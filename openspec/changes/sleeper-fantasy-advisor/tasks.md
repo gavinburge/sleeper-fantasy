@@ -9,13 +9,13 @@
 
 ## 2. Provider contracts and source adapters
 
-- [ ] 2.1 Define C# normalized domain types and provider interfaces for league data, performance data, injury data, and language-model analysis; verify adapters can be substituted in unit tests.
-- [ ] 2.2 Implement the Sleeper adapter for user, league, roster, settings, matchup, transaction, player, state, and trending endpoints with timeouts, rate limiting, and cache policies; verify fixtures cover successful, empty, rate-limited, and unavailable responses.
-- [ ] 2.3 Implement nflverse ingestion for schedules, weekly player statistics, rosters, and usage data; verify downloaded fixtures normalize into player and performance records with source timestamps.
-- [ ] 2.4 Implement the NFL injury-report adapter and parser for injury, practice, and game-status fields; verify fixtures cover status changes, missing fields, and malformed or unavailable pages.
-- [ ] 2.5 Implement player identity mapping across Sleeper and external identifiers with conservative matching and ambiguity warnings; verify known mappings resolve and ambiguous names are not guessed.
-- [ ] 2.6 Implement the Gemini language-model adapter with `HttpClientFactory`, server-side key handling, bounded prompts, structured response validation, timeouts, and error mapping; verify invalid or unavailable model responses are rejected without losing deterministic findings.
-- [ ] 2.7 Document provider configuration, source freshness expectations, and replacement adapter contracts; verify the documented local setup matches the implemented .NET configuration and environment variables.
+- [x] 2.1 Define C# normalized domain types and provider interfaces for league data, performance data, injury data, and language-model analysis; verify adapters can be substituted in unit tests.
+- [x] 2.2 Implement the Sleeper adapter for user, league, roster, settings, matchup, transaction, player, state, and trending endpoints with timeouts, rate limiting, and cache policies; verify fixtures cover successful, empty, rate-limited, and unavailable responses.
+- [x] 2.3 Implement nflverse ingestion for schedules, weekly player statistics, rosters, and usage data; verify downloaded fixtures normalize into player and performance records with source timestamps.
+- [x] 2.4 Implement the NFL injury-report adapter and parser for injury, practice, and game-status fields; verify fixtures cover status changes, missing fields, and malformed or unavailable pages.
+- [x] 2.5 Implement player identity mapping across Sleeper and external identifiers with conservative matching and ambiguity warnings; verify known mappings resolve and ambiguous names are not guessed.
+- [x] 2.6 Implement the Gemini language-model adapter with `HttpClientFactory`, server-side key handling, bounded prompts, structured response validation, timeouts, and error mapping; verify invalid or unavailable model responses are rejected without losing deterministic findings.
+- [x] 2.7 Document provider configuration, source freshness expectations, and replacement adapter contracts; verify the documented local setup matches the implemented .NET configuration and environment variables.
 
 ## 3. League configuration
 

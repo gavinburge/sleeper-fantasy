@@ -17,4 +17,8 @@ public sealed class ProviderOptions
 
     public string LanguageModel { get; set; } = "None";
     public string? GeminiApiKey { get; set; }
+    public string GeminiModel { get; set; } = "gemini-2.0-flash";
+    public string GeminiBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta";
+    public int LanguageModelTimeoutSeconds { get; set; } = 30;
+    public int LanguageModelMaxPromptCharacters { get; set; } = 24000;
 }

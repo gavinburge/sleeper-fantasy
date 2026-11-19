@@ -4,8 +4,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using SleeperFantasy.Application.Abstractions;
 using SleeperFantasy.Application.Features.Authentication;
+using SleeperFantasy.Application.Providers;
+using SleeperFantasy.Domain.Providers;
 using SleeperFantasy.Infrastructure.Configuration;
 using SleeperFantasy.Infrastructure.Identity;
 using SleeperFantasy.Infrastructure.Persistence;
@@ -57,6 +60,28 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddHttpContextAccessor();
         services.AddScoped<IAdministratorSession, IdentityAdministratorSession>();
+        services.AddSingleton<IPlayerIdentityResolver, PlayerIdentityResolver>();
+
+        services.AddHttpClient<ILeagueDataProvider, Providers.SleeperDataProvider>((sp, client) =>
+        {
+            client.BaseAddress = new Uri(sp.GetRequiredService<IOptions<ProviderOptions>>().Value.SleeperBaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddHttpClient<IPerformanceDataProvider, Providers.NflverseDataProvider>((sp, client) =>
+        {
+            client.BaseAddress = new Uri(sp.GetRequiredService<IOptions<ProviderOptions>>().Value.NflverseBaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddHttpClient<IInjuryDataProvider, Providers.NflInjuryReportProvider>((sp, client) =>
+        {
+            client.BaseAddress = new Uri(sp.GetRequiredService<IOptions<ProviderOptions>>().Value.InjuryReportBaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddHttpClient<ILanguageModelProvider, Providers.GeminiLanguageModelProvider>((sp, client) =>
+        {
+            client.BaseAddress = new Uri(sp.GetRequiredService<IOptions<ProviderOptions>>().Value.GeminiBaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(sp.GetRequiredService<IOptions<ProviderOptions>>().Value.LanguageModelTimeoutSeconds);
+        });
 
         services.AddIdentityCore<ApplicationUser>(options =>
             {
