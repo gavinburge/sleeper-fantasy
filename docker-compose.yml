@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: sleeper_fantasy
+      POSTGRES_USER: sleeper
+      POSTGRES_PASSWORD: sleeper
+    ports:
+      - "5432:5432"
+    volumes:
+      - sleeper-fantasy-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sleeper -d sleeper_fantasy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sleeper-fantasy-postgres:

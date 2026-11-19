@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SleeperFantasy.Api/SleeperFantasy.Api.csproj" />
+    <Project Path="src/SleeperFantasy.Application/SleeperFantasy.Application.csproj" />
+    <Project Path="src/SleeperFantasy.Domain/SleeperFantasy.Domain.csproj" />
+    <Project Path="src/SleeperFantasy.Infrastructure/SleeperFantasy.Infrastructure.csproj" />
+    <Project Path="src/SleeperFantasy.Web/SleeperFantasy.Web.csproj" />
+    <Project Path="src/SleeperFantasy.Worker/SleeperFantasy.Worker.csproj" />
+  </Folder>
+</Solution>

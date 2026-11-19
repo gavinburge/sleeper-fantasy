@@ -2,10 +2,10 @@
 
 ## 1. Application foundation
 
-- [ ] 1.1 Create the .NET 10 solution with Domain, Application, Infrastructure, API, Web, and Worker projects; verify `dotnet build` succeeds.
-- [ ] 1.2 Add PostgreSQL persistence and migrations for manager configuration, provider cache metadata, player identity mappings, analysis jobs, evidence, and results; verify migrations apply to a clean database.
-- [ ] 1.3 Add ASP.NET Core configuration validation for provider keys, cache policies, runtime URLs, and Identity settings; verify startup fails clearly for missing required secrets.
-- [ ] 1.4 Add the single-administrator ASP.NET Identity flow with HTTP-only secure cookies, lockout, route protection, antiforgery validation, and secret redaction; verify unauthenticated API requests and state-changing requests without antiforgery tokens are rejected.
+- [x] 1.1 Create the .NET 10 solution with Domain, Application, Infrastructure, API, Web, and Worker projects; verify `dotnet build` succeeds.
+- [x] 1.2 Add PostgreSQL persistence and migrations for manager configuration, provider cache metadata, player identity mappings, analysis jobs, evidence, and results; verify migrations apply to a clean database.
+- [x] 1.3 Add ASP.NET Core configuration validation for provider keys, cache policies, runtime URLs, and Identity settings; verify startup fails clearly for missing required secrets.
+- [x] 1.4 Add the single-administrator ASP.NET Identity flow with HTTP-only secure cookies, lockout, route protection, antiforgery validation, and secret redaction; verify unauthenticated API requests and state-changing requests without antiforgery tokens are rejected.
 
 ## 2. Provider contracts and source adapters
 
