@@ -75,15 +75,11 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
                 EvidenceIds = finding.EvidenceIds.Where(validEvidence.Contains).Distinct().ToArray(),
                 Confidence = Math.Clamp(finding.Confidence, 0m, 1m)
             })
+            .Where(finding => finding.EvidenceIds.Count > 0)
             .ToArray();
         
         var response = result.Value with { Findings = validFindings };
         
-        if (response.Findings.Any(x => x.EvidenceIds.Count == 0))
-        {
-            caveats.Add("Some model explanations did not cite valid evidence and were retained without factual authority.");
-        }
-
         return new AnalysisReview(
             deterministic,
             response,

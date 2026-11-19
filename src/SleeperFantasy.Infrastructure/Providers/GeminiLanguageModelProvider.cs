@@ -38,48 +38,24 @@ public sealed class GeminiLanguageModelProvider(
 
         try
         {
-            for (var attempt = 0; ; attempt++)
+            using (var response = await new GeminiResilienceExecutor(settings).ExecuteAsync(
+                attemptCancellation =>
+                {
+                    var geminiRequest = new HttpRequestMessage(
+                        HttpMethod.Post,
+                        $"models/{Uri.EscapeDataString(settings.GeminiModel)}:generateContent")
+                    {
+                        Content = JsonContent.Create(new
+                        {
+                            contents = new[] { new { parts = new[] { new { text = prompt } } } },
+                            generationConfig = new { responseMimeType = "application/json", temperature = 0.1 }
+                        })
+                    };
+                    geminiRequest.Headers.TryAddWithoutValidation("x-goog-api-key", settings.GeminiApiKey);
+                    return SendAndDisposeAsync(httpClient, geminiRequest, attemptCancellation);
+                },
+                cancellationToken))
             {
-                using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                attemptTimeout.CancelAfter(TimeSpan.FromSeconds(settings.LanguageModelTimeoutSeconds));
-                using var geminiRequest = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"models/{Uri.EscapeDataString(settings.GeminiModel)}:generateContent")
-                {
-                    Content = JsonContent.Create(new
-                    {
-                        contents = new[] { new { parts = new[] { new { text = prompt } } } },
-                        generationConfig = new { responseMimeType = "application/json", temperature = 0.1 }
-                    })
-                };
-                geminiRequest.Headers.TryAddWithoutValidation("x-goog-api-key", settings.GeminiApiKey);
-
-                HttpResponseMessage response;
-                try
-                {
-                    response = await httpClient.SendAsync(geminiRequest, attemptTimeout.Token);
-                }
-                catch (HttpRequestException) when (attempt < settings.LanguageModelMaxRetries)
-                {
-                    await DelayBeforeRetry(attempt, cancellationToken);
-                    continue;
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < settings.LanguageModelMaxRetries)
-                {
-                    await DelayBeforeRetry(attempt, cancellationToken);
-                    continue;
-                }
-
-                using (response)
-                {
-                    var retryable = response.StatusCode == HttpStatusCode.TooManyRequests
-                        || (int)response.StatusCode >= 500;
-                    if (retryable && attempt < settings.LanguageModelMaxRetries)
-                    {
-                        await DelayBeforeRetry(attempt, cancellationToken);
-                        continue;
-                    }
-
                     if (response.StatusCode == HttpStatusCode.TooManyRequests)
                     {
                         return ProviderResult<LanguageModelResponse>.Failure(
@@ -94,7 +70,7 @@ public sealed class GeminiLanguageModelProvider(
                     }
 
                     using var document = await JsonDocument.ParseAsync(
-                        await response.Content.ReadAsStreamAsync(attemptTimeout.Token), cancellationToken: attemptTimeout.Token);
+                        await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
                     var text = GetResponseText(document.RootElement);
                     if (string.IsNullOrWhiteSpace(text))
                     {
@@ -124,17 +100,22 @@ public sealed class GeminiLanguageModelProvider(
                     var knownEvidence = request.Evidence.Select(x => x.EvidenceId).ToHashSet(StringComparer.Ordinal);
                     var findings = parsed.Findings!
                         .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.SubjectKey) && !string.IsNullOrWhiteSpace(x.Explanation))
-                        .Select(x => new LanguageModelFinding(
+                        .Select(x => new
+                        {
+                            Finding = new LanguageModelFinding(
                             x!.SubjectKey!, x.Explanation!, Math.Clamp(x.Confidence ?? 0m, 0m, 1m),
                             (x.EvidenceIds ?? []).Where(knownEvidence.Contains).Distinct(StringComparer.Ordinal).ToArray(),
-                            x.Caveats ?? []))
+                            x.Caveats ?? []),
+                            EvidenceCount = (x.EvidenceIds ?? []).Count(knownEvidence.Contains)
+                        })
+                        .Where(x => x.EvidenceCount > 0)
+                        .Select(x => x.Finding)
                         .ToArray();
 
                     return ProviderResult<LanguageModelResponse>.AvailableResult(
                         new LanguageModelResponse(settings.GeminiModel, parsed.Summary, findings,
                             parsed.Conflicts!, DateTimeOffset.UtcNow),
                         Name, observedAt, observedAt.AddMinutes(30));
-                }
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -232,37 +213,68 @@ public sealed class GeminiLanguageModelProvider(
     private static string ToPascalCase(string value) =>
         char.ToUpperInvariant(value[0]) + value[1..];
 
-    private async Task DelayBeforeRetry(int attempt, CancellationToken cancellationToken)
-    {
-        var delay = Math.Max(0, settings.LanguageModelRetryDelayMilliseconds) * (attempt + 1);
-        await Task.Delay(TimeSpan.FromMilliseconds(delay), cancellationToken);
-    }
-
     private static string BuildPrompt(LanguageModelRequest request, int maxCharacters)
     {
-        var limit = Math.Max(256, maxCharacters);
+        var limit = Math.Max(1, maxCharacters);
         var evidence = request.Evidence.Take(100).Select(x => new PromptEvidence(
             x.EvidenceId, x.SubjectKey, x.Fact, x.Source, x.ObservedAt, x.FreshUntil, x.Confidence)).ToList();
-        string Serialize() => JsonSerializer.Serialize(evidence);
-        var system = request.SystemInstruction;
-        var user = request.UserPrompt;
-        var deterministic = request.DeterministicSummary;
-        string Compose() =>
-            $"{system}\n\nDeterministic summary (authoritative; do not override):\n{deterministic}\n\nEvidence:\n{Serialize()}\n\n{user}";
+        var deterministic = ParseStructuredSummary(request.DeterministicSummary);
+        const string deterministicContract = "Deterministic summary (authoritative; do not override): Deterministic facts, scores, priorities, conflicts, and unavailable signals are authoritative. Do not change, override, or invent them.";
+        const string responseContract = "Return only a JSON object with summary, findings, and conflicts. Findings must cite supplied evidence IDs.";
 
-        while (evidence.Count > 0 && Compose().Length > limit)
-            evidence.RemoveAt(evidence.Count - 1);
-        while (Compose().Length > limit && deterministic.Length > 0)
-            deterministic = deterministic[..(deterministic.Length / 2)];
-        while (Compose().Length > limit && evidence.Count > 0)
-            evidence.RemoveAt(evidence.Count - 1);
-        while (Compose().Length > limit && user.Length > 0)
-            user = user[..(user.Length / 2)];
-        while (Compose().Length > limit && system.Length > 0)
-            system = system[..(system.Length / 2)];
+        string Compose(bool includeUser) =>
+            $"{request.SystemInstruction}\n\n{deterministicContract}\n{responseContract}\n\nDeterministic data:\n{deterministic}\n\nEvidence:\n{JsonSerializer.Serialize(evidence)}"
+            + (includeUser ? $"\n\n{request.UserPrompt}" : string.Empty);
 
-        var prompt = Compose();
-        return prompt[..Math.Min(prompt.Length, limit)];
+        while (evidence.Count > 0 && Compose(includeUser: true).Length > limit)
+            evidence.RemoveAt(evidence.Count - 1);
+        while (Compose(includeUser: true).Length > limit && RemoveStructuredData(ref deterministic))
+        {
+        }
+
+        var prompt = Compose(includeUser: false);
+        if (prompt.Length <= limit && Compose(includeUser: true).Length <= limit)
+            prompt = Compose(includeUser: true);
+        return prompt.Length <= limit ? prompt : request.SystemInstruction[..Math.Min(request.SystemInstruction.Length, limit)];
+    }
+
+    private static System.Text.Json.Nodes.JsonNode ParseStructuredSummary(string summary) =>
+        string.IsNullOrWhiteSpace(summary)
+            ? new System.Text.Json.Nodes.JsonObject()
+            : System.Text.Json.Nodes.JsonNode.Parse(summary) ?? new System.Text.Json.Nodes.JsonObject();
+
+    private static async Task<HttpResponseMessage> SendAndDisposeAsync(
+        HttpClient client,
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await client.SendAsync(request, cancellationToken);
+        }
+        finally
+        {
+            request.Dispose();
+        }
+    }
+
+    private static bool RemoveStructuredData(ref System.Text.Json.Nodes.JsonNode summary)
+    {
+        if (summary is not System.Text.Json.Nodes.JsonObject obj)
+            return false;
+        var array = obj.FirstOrDefault(x => x.Value is System.Text.Json.Nodes.JsonArray).Value as System.Text.Json.Nodes.JsonArray;
+        if (array is not null && array.Count > 0)
+        {
+            array.RemoveAt(array.Count - 1);
+            return true;
+        }
+        var property = obj.LastOrDefault();
+        if (property.Key is not null)
+        {
+            obj.Remove(property.Key);
+            return true;
+        }
+        return false;
     }
 
     private sealed record PromptEvidence(

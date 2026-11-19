@@ -1,4 +1,5 @@
 using SleeperFantasy.Application.Features.Analysis;
+using SleeperFantasy.Application.Providers;
 using SleeperFantasy.Domain.Providers;
 using Xunit;
 
@@ -82,6 +83,34 @@ public sealed class SourceRefreshServiceTests
     }
 
     [Fact]
+    public async Task Removes_colliding_identity_mappings_and_emits_evidence_for_both_players()
+    {
+        var fixture = new AnalysisFixture
+        {
+            ExternalRoster =
+            [
+                new ExternalPlayerRecord("gsis-shared", "Rostered Player", "ABC", "RB", "shared", DateTimeOffset.UtcNow),
+                new ExternalPlayerRecord("gsis-other", "Free Player", "ABC", "WR", "other", DateTimeOffset.UtcNow)
+            ],
+            ExternalIds = new Dictionary<string, string>
+            {
+                ["rostered"] = "shared",
+                ["free"] = "shared"
+            }
+        };
+
+        var result = await fixture.CreateRefreshService(
+            identityResolver: new CollidingIdentityResolver())
+            .RefreshAsync(fixture.Configuration, CancellationToken.None);
+
+        Assert.DoesNotContain(result.Performance, x => x.PlayerId is "rostered" or "free");
+        var conflicts = result.Evidence.Where(x => x.EvidenceType == "identity-conflict").ToArray();
+        Assert.Equal(2, conflicts.Length);
+        Assert.Contains(conflicts, x => x.SubjectKey == "rostered" && x.IdentityKey == "shared");
+        Assert.Contains(conflicts, x => x.SubjectKey == "free" && x.IdentityKey == "shared");
+    }
+
+    [Fact]
     public async Task Keeps_unresolved_external_ids_out_of_claims_and_records_identity_metadata()
     {
         var fixture = new AnalysisFixture
@@ -99,6 +128,15 @@ public sealed class SourceRefreshServiceTests
         Assert.Contains(result.Evidence, x =>
             x.EvidenceType == "identity-unavailable"
             || x.EvidenceType == "identity-conflict");
+    }
+
+    internal sealed class CollidingIdentityResolver : IPlayerIdentityResolver
+    {
+        public IdentityMatch Resolve(
+            PlayerRecord sleeperPlayer,
+            IReadOnlyCollection<ExternalPlayerRecord> candidates,
+            string provider) =>
+            new(sleeperPlayer.PlayerId, "shared", 1m, false, null);
     }
 
     [Fact]

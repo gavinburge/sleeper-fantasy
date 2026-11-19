@@ -1,4 +1,5 @@
 using SleeperFantasy.Application.Features.Analysis;
+using SleeperFantasy.Application.Providers;
 using SleeperFantasy.Domain.Analysis;
 using SleeperFantasy.Domain.Entities;
 using SleeperFantasy.Domain.Providers;
@@ -63,12 +64,13 @@ internal sealed class AnalysisFixture
 
     public SourceRefreshService CreateRefreshService(
         bool failInjuries = false,
-        bool throwInjuries = false) =>
+        bool throwInjuries = false,
+        IPlayerIdentityResolver? identityResolver = null) =>
         new(new StubLeagueProvider(this), new StubPerformanceProvider(this), new StubInjuryProvider
         {
             Fail = failInjuries,
             Throw = throwInjuries
-        });
+        }, identityResolver);
 }
 
 internal sealed class StubLeagueProvider(AnalysisFixture fixture) : ILeagueDataProvider

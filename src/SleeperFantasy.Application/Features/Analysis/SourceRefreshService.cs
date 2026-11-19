@@ -168,6 +168,8 @@ public sealed class SourceRefreshService(
         ICollection<EvidenceItem> evidence)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var claims = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var conflicted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var player in players.Values)
         {
             if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(player.PlayerId))
@@ -197,7 +199,24 @@ public sealed class SourceRefreshService(
                 performanceProvider.ProviderName);
             if (match.ProviderPlayerId is not null && !match.IsAmbiguous)
             {
-                map[match.ProviderPlayerId] = match.SleeperPlayerId;
+                if (claims.TryGetValue(match.ProviderPlayerId, out var existingSleeperId)
+                    && !string.Equals(existingSleeperId, match.SleeperPlayerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    map.Remove(match.ProviderPlayerId);
+                    conflicted.Add(match.ProviderPlayerId);
+                    AddIdentityConflictEvidence(
+                        evidence,
+                        match.ProviderPlayerId,
+                        existingSleeperId,
+                        match.SleeperPlayerId,
+                        $"External identity {match.ProviderPlayerId} resolved to multiple Sleeper players; the mapping was removed.");
+                }
+                else if (!conflicted.Contains(match.ProviderPlayerId))
+                {
+                    claims[match.ProviderPlayerId] = match.SleeperPlayerId;
+                    map[match.ProviderPlayerId] = match.SleeperPlayerId;
+                }
+
                 continue;
             }
 
@@ -218,6 +237,30 @@ public sealed class SourceRefreshService(
         }
 
         return map;
+    }
+
+    private void AddIdentityConflictEvidence(
+        ICollection<EvidenceItem> evidence,
+        string providerPlayerId,
+        string firstSleeperPlayerId,
+        string secondSleeperPlayerId,
+        string message)
+    {
+        var observedAt = DateTimeOffset.UtcNow;
+        foreach (var sleeperPlayerId in new[] { firstSleeperPlayerId, secondSleeperPlayerId })
+        {
+            evidence.Add(new EvidenceItem(
+                $"{performanceProvider.ProviderName}:identity-conflict:{providerPlayerId}:{sleeperPlayerId}",
+                performanceProvider.ProviderName,
+                "identity-conflict",
+                sleeperPlayerId,
+                message,
+                observedAt,
+                null,
+                null,
+                providerPlayerId,
+                ProviderAvailability.Unavailable));
+        }
     }
 
     private static IReadOnlyList<PlayerPerformanceRecord> NormalizePerformance(
