@@ -1,5 +1,9 @@
 using SleeperFantasy.Application.Providers;
+using SleeperFantasy.Application.Features.LeagueSetup;
+using SleeperFantasy.Application.Abstractions;
 using SleeperFantasy.Domain.Providers;
+using SleeperFantasy.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace SleeperFantasy.ProviderTests;
@@ -73,24 +77,124 @@ public sealed class ProviderContractTests
         Assert.Equal(ProviderAvailability.Unavailable, unavailable.Availability);
     }
 
+    [Fact]
+    public async Task League_discovery_returns_leagues_and_manager_roster()
+    {
+        var provider = new FixtureLeagueProvider
+        {
+            User = new SleeperUser("user-1", "manager", "Manager"),
+            Leagues =
+            [
+                new LeagueSummary("league-1", "League", "2026", "in_season", "nfl", 2, "ppr")
+            ],
+            Rosters =
+            [
+                new RosterRecord("1", "user-1", [], [], null, null, null, null, "Home"),
+                new RosterRecord("2", "user-2", [], [], null, null, null, null, "Rivals")
+            ]
+        };
+        var service = new LeagueConfigurationService(provider, new TestDbContext());
+
+        var result = await service.DiscoverAsync("manager", 2026, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Value!.Leagues);
+        Assert.True(result.Value.Leagues[0].Teams[0].IsManagerTeam);
+    }
+
+    [Fact]
+    public async Task League_discovery_returns_not_found_for_empty_leagues()
+    {
+        var service = new LeagueConfigurationService(
+            new FixtureLeagueProvider
+            {
+                User = new SleeperUser("user-1", "manager", "Manager"),
+                Leagues = []
+            },
+            new TestDbContext());
+
+        var result = await service.DiscoverAsync("manager", 2026, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(404, result.StatusCode);
+        Assert.Equal("NO_LEAGUES", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task League_save_rejects_ambiguous_team_name()
+    {
+        var provider = new FixtureLeagueProvider
+        {
+            User = new SleeperUser("user-1", "manager", "Manager"),
+            Leagues = [new LeagueSummary("league-1", "League", "2026", "in_season", "nfl", 2, "ppr")],
+            Rosters =
+            [
+                new RosterRecord("1", "user-1", [], [], null, null, null, null, "Same Name"),
+                new RosterRecord("2", "user-1", [], [], null, null, null, null, "Same Name")
+            ]
+        };
+        var service = new LeagueConfigurationService(provider, new TestDbContext());
+
+        var result = await service.SaveAsync(
+            "app-user",
+            new LeagueConfigurationRequest("manager", 2026, "league-1", null, "Same Name"),
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Equal("AMBIGUOUS_TEAM", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task League_configuration_round_trips_without_sleeper_credentials()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+        var provider = new FixtureLeagueProvider
+        {
+            User = new SleeperUser("user-1", "manager", "Manager"),
+            Leagues = [new LeagueSummary("league-1", "League", "2026", "in_season", "nfl", 2, "ppr")],
+            Rosters = [new RosterRecord("1", "user-1", [], [], null, null, null, null, "Home")]
+        };
+        var service = new LeagueConfigurationService(provider, db);
+
+        var saved = await service.SaveAsync(
+            "app-user",
+            new LeagueConfigurationRequest("manager", 2026, "league-1", "1", null),
+            CancellationToken.None);
+        var loaded = await service.GetAsync("app-user", CancellationToken.None);
+
+        Assert.True(saved.Succeeded);
+        Assert.NotNull(loaded);
+        Assert.Equal("user-1", loaded.SleeperUserId);
+        Assert.Equal("league-1", loaded.LeagueId);
+        Assert.Equal("1", loaded.RosterId);
+        Assert.Equal(2026, loaded.Season);
+    }
+
     private sealed class FixtureLeagueProvider : ILeagueDataProvider
     {
+        public SleeperUser User { get; init; } = new("fixture-user-id", "fixture-user", "Fixture User");
+        public IReadOnlyList<LeagueSummary> Leagues { get; init; } = [];
+        public IReadOnlyList<RosterRecord> Rosters { get; init; } = [];
         public string ProviderName => "fixture";
 
         public Task<ProviderResult<SleeperUser>> GetUserAsync(string username, CancellationToken cancellationToken) =>
             Task.FromResult(ProviderResult<SleeperUser>.AvailableResult(
-                new SleeperUser("fixture-user-id", username, "Fixture User"),
+                User with { Username = username },
                 ProviderName,
                 DateTimeOffset.UtcNow));
 
         public Task<ProviderResult<IReadOnlyList<LeagueSummary>>> GetLeaguesAsync(string userId, string season, CancellationToken cancellationToken) =>
-            Task.FromResult(ProviderResult<IReadOnlyList<LeagueSummary>>.EmptyResult(ProviderName, DateTimeOffset.UtcNow));
+            Task.FromResult(ProviderResult<IReadOnlyList<LeagueSummary>>.AvailableResult(Leagues, ProviderName, DateTimeOffset.UtcNow));
 
         public Task<ProviderResult<LeagueSummary>> GetLeagueAsync(string leagueId, CancellationToken cancellationToken) =>
             Task.FromResult(ProviderResult<LeagueSummary>.Failure(ProviderAvailability.Unavailable, ProviderName, DateTimeOffset.UtcNow, "FIXTURE", "not needed"));
 
         public Task<ProviderResult<IReadOnlyList<RosterRecord>>> GetRostersAsync(string leagueId, CancellationToken cancellationToken) =>
-            Task.FromResult(ProviderResult<IReadOnlyList<RosterRecord>>.EmptyResult(ProviderName, DateTimeOffset.UtcNow));
+            Task.FromResult(ProviderResult<IReadOnlyList<RosterRecord>>.AvailableResult(Rosters, ProviderName, DateTimeOffset.UtcNow));
 
         public Task<ProviderResult<LeagueSettings>> GetSettingsAsync(string leagueId, CancellationToken cancellationToken) =>
             Task.FromResult(ProviderResult<LeagueSettings>.Failure(ProviderAvailability.Unavailable, ProviderName, DateTimeOffset.UtcNow, "FIXTURE", "not needed"));
@@ -109,5 +213,22 @@ public sealed class ProviderContractTests
 
         public Task<ProviderResult<IReadOnlyList<TrendingPlayer>>> GetTrendingPlayersAsync(string sport, string type, int lookbackHours, CancellationToken cancellationToken) =>
             Task.FromResult(ProviderResult<IReadOnlyList<TrendingPlayer>>.EmptyResult(ProviderName, DateTimeOffset.UtcNow));
+    }
+
+    private sealed class TestDbContext : IAppDbContext
+    {
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.ManagerConfiguration> ManagerConfigurations =>
+            throw new NotSupportedException();
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.ProviderCacheMetadata> ProviderCacheMetadata =>
+            throw new NotSupportedException();
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.PlayerIdentityMapping> PlayerIdentityMappings =>
+            throw new NotSupportedException();
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.AnalysisRun> AnalysisRuns =>
+            throw new NotSupportedException();
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.AnalysisEvidence> AnalysisEvidence =>
+            throw new NotSupportedException();
+        public Microsoft.EntityFrameworkCore.DbSet<SleeperFantasy.Domain.Entities.AnalysisResult> AnalysisResults =>
+            throw new NotSupportedException();
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 }

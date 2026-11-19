@@ -29,7 +29,8 @@ public sealed record RosterRecord(
     int? Wins,
     int? Losses,
     int? Ties,
-    decimal? PointsFor);
+    decimal? PointsFor,
+    string? TeamName = null);
 
 public sealed record MatchupRecord(
     string MatchupId,

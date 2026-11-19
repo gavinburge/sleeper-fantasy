@@ -252,7 +252,8 @@ public sealed class SleeperDataProvider(
                 value.TryGetProperty("settings", out var settings) ? ReadInt(settings, "wins") : null,
                 value.TryGetProperty("settings", out settings) ? ReadInt(settings, "losses") : null,
                 value.TryGetProperty("settings", out settings) ? ReadInt(settings, "ties") : null,
-                value.TryGetProperty("settings", out settings) ? ReadDecimal(settings, "fpts") : null);
+                value.TryGetProperty("settings", out settings) ? ReadDecimal(settings, "fpts") : null,
+                value.TryGetProperty("metadata", out var metadata) ? metadata.GetString("team_name") : null);
     }
 
     private static LeagueSettings ParseSettings(string leagueId, JsonElement value)

@@ -19,9 +19,9 @@
 
 ## 3. League configuration
 
-- [ ] 3.1 Implement league discovery from Sleeper username and season, including league/team selection and ambiguous-name handling; verify API tests cover valid, empty, invalid, and ambiguous selections.
-- [ ] 3.2 Persist and retrieve the selected Sleeper user, league, roster, season, and configuration timestamp without storing Sleeper credentials; verify round-trip persistence and protected access.
-- [ ] 3.3 Add league configuration API routes and error responses; verify a same-origin Blazor client can configure a league through the API without calling provider endpoints directly.
+- [x] 3.1 Implement league discovery from Sleeper username and season, including league/team selection and ambiguous-name handling; verify API tests cover valid, empty, invalid, and ambiguous selections.
+- [x] 3.2 Persist and retrieve the selected Sleeper user, league, roster, season, and configuration timestamp without storing Sleeper credentials; verify round-trip persistence and protected access.
+- [x] 3.3 Add league configuration API routes and error responses; verify a same-origin Blazor client can configure a league through the API without calling provider endpoints directly.
 
 ## 4. Analysis domain and ranking
 

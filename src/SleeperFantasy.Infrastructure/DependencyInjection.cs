@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SleeperFantasy.Application.Abstractions;
 using SleeperFantasy.Application.Features.Authentication;
+using SleeperFantasy.Application.Features.LeagueSetup;
 using SleeperFantasy.Application.Providers;
 using SleeperFantasy.Domain.Providers;
 using SleeperFantasy.Infrastructure.Configuration;
@@ -60,6 +61,7 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddHttpContextAccessor();
         services.AddScoped<IAdministratorSession, IdentityAdministratorSession>();
+        services.AddScoped<LeagueConfigurationService>();
         services.AddSingleton<IPlayerIdentityResolver, PlayerIdentityResolver>();
 
         services.AddHttpClient<ILeagueDataProvider, Providers.SleeperDataProvider>((sp, client) =>
