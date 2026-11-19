@@ -12,13 +12,23 @@ namespace SleeperFantasy.ProviderTests;
 public sealed class ProductionProviderResponseTests
 {
     [Fact]
+    public async Task Sleeper_public_shape_fixture_loads_user()
+    {
+        var handler = new StaticResponseHandler(Fixture("sleeper-user.json"), "application/json");
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.sleeper.app/") };
+        var provider = new SleeperDataProvider(client, Options.Create(new CacheOptions()), NullLogger<SleeperDataProvider>.Instance);
+
+        var result = await provider.GetUserAsync("fixture-user", CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Equal("fixture-user-id", result.Value?.UserId);
+    }
+
+    [Fact]
     public async Task Nflverse_production_stats_normalize_team_and_usage_fields()
     {
         var handler = new StaticResponseHandler(
-            """
-            player_id,player_name,position,season,week,season_type,team,receptions,targets,carries,fantasy_points,fantasy_points_ppr
-            00-0000001,Fixture Player,RB,2026,10,REG,ABC,5,7,18,14.2,19.2
-            """,
+            Fixture("nflverse-stats.csv"),
             "text/csv");
         using var client = new HttpClient(handler)
         {
@@ -45,10 +55,7 @@ public sealed class ProductionProviderResponseTests
     public async Task Nflverse_roster_payload_preserves_external_identity_fields()
     {
         var handler = new StaticResponseHandler(
-            """
-            gsis_id,display_name,position,team_abbr,player_id
-            00-0000002,Fixture & Player,WR,ABC,nfl-id-2
-            """,
+            Fixture("nflverse-roster.csv"),
             "text/csv");
         using var client = new HttpClient(handler)
         {
@@ -72,25 +79,7 @@ public sealed class ProductionProviderResponseTests
     public async Task Nfl_html_production_report_maps_team_and_status_columns()
     {
         var handler = new StaticResponseHandler(
-            """
-            <section class="nfl-o-injury-report__unit">
-              <div class="d3-o-section-sub-title"><span>Colts</span></div>
-              <div class="d3-o-table--horizontal-scroll">
-                <table class="d3-o-table d3-o-table--detailed d3-o-reports--detailed">
-                  <thead><tr><th>Player</th><th>Position</th><th>Injuries</th><th>Practice Status</th><th>Game Status</th></tr></thead>
-                  <tbody>
-                    <tr>
-                      <td><a href="/players/sauce-gardner/"> Sauce Gardner </a></td>
-                      <td>CB</td>
-                      <td>Calf</td>
-                      <td>Did Not Participate In Practice</td>
-                      <td>Questionable</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            """,
+            Fixture("nfl-injury-report.html"),
             "text/html");
         using var client = new HttpClient(handler)
         {
@@ -104,26 +93,18 @@ public sealed class ProductionProviderResponseTests
         var result = await provider.GetCurrentReportsAsync(CancellationToken.None);
 
         var record = Assert.Single(result.Value!);
-        Assert.Equal("Colts", record.Team);
-        Assert.Equal("CB", record.Position);
-        Assert.Equal("Calf", record.Injury);
-        Assert.Equal("Did Not Participate In Practice", record.PracticeStatus);
-        Assert.Equal(GameStatus.Questionable, record.Status);
+        Assert.Equal("New & England", record.Team);
+        Assert.Equal("WR", record.Position);
+        Assert.Equal("Ankle", record.Injury);
+        Assert.Equal("Limited", record.PracticeStatus);
+        Assert.Equal(GameStatus.Out, record.Status);
     }
 
     [Fact]
     public async Task Nfl_html_parser_accepts_attribute_order_single_quotes_and_entities()
     {
         var handler = new StaticResponseHandler(
-            """
-            <section data-week='10' class='foo nfl-o-injury-report__unit'>
-              <div class='d3-o-section-sub-title'><span>New &amp; England</span></div>
-              <table>
-                <tr><th>Player</th><th>Position</th><th>Injuries</th><th>Practice Status</th><th>Game Status</th></tr>
-                <tr data-row='1'><td>Fixture &amp; Player</td><td>WR</td><td>Ankle</td><td>Limited</td><td>Out</td></tr>
-              </table>
-            </section>
-            """,
+            "<section data-week='10' class='foo nfl-o-injury-report__unit'><div class='d3-o-section-sub-title'><span>New &amp; England</span></div><table><tr><th>Player</th><th>Position</th><th>Injuries</th><th>Practice Status</th><th>Game Status</th></tr><tr data-row='1'><td>Fixture &amp; Player</td><td>WR</td><td>Ankle</td><td>Limited</td><td>Out</td></tr></table></section>",
             "text/html");
         using var client = new HttpClient(handler)
         {
@@ -141,6 +122,24 @@ public sealed class ProductionProviderResponseTests
         Assert.Equal("Fixture & Player", record.PlayerName);
         Assert.Equal(GameStatus.Out, record.Status);
     }
+
+    [Fact]
+    public async Task Nfl_html_parser_returns_empty_for_unsupported_section_shape()
+    {
+        var handler = new StaticResponseHandler(
+            "<main><section class='nfl-o-injury-report__unit'><h2>No report</h2></section></main>",
+            "text/html");
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://www.nfl.com/injuries/") };
+        var provider = new NflInjuryReportProvider(client, Options.Create(new CacheOptions()), NullLogger<NflInjuryReportProvider>.Instance);
+
+        var result = await provider.GetCurrentReportsAsync(CancellationToken.None);
+
+        Assert.Equal(ProviderAvailability.Empty, result.Availability);
+        Assert.Empty(result.Value ?? []);
+    }
+
+    private static string Fixture(string name) =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
     private sealed class StaticResponseHandler(string body, string mediaType) : HttpMessageHandler
     {

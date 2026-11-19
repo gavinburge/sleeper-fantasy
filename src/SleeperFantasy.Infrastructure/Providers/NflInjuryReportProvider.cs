@@ -23,6 +23,7 @@ public sealed class NflInjuryReportProvider(
         var response = await GetTextAsync(string.Empty, cancellationToken);
         if (response.Availability != ProviderAvailability.Available || response.Value is null)
         {
+            logger.LogWarning("Provider {Provider} injury report returned {Availability} data.", Name, response.Availability);
             return ProviderResult<IReadOnlyList<InjuryReportRecord>>.Failure(
                 response.Availability,
                 Name,
@@ -35,6 +36,11 @@ public sealed class NflInjuryReportProvider(
         {
             var sourceUrl = BaseAddress?.ToString() ?? string.Empty;
             var records = Parse(response.Value, sourceUrl, response.ObservedAt);
+            logger.LogInformation("Provider {Provider} resource injury-report produced {RecordCount} records.", Name, records.Count);
+            if (records.Count == 0)
+            {
+                logger.LogWarning("Provider {Provider} injury report contained no supported injury table or records.", Name);
+            }
             return records.Count == 0
                 ? ProviderResult<IReadOnlyList<InjuryReportRecord>>.EmptyResult(
                     Name, response.ObservedAt, response.FreshUntil)
@@ -43,6 +49,7 @@ public sealed class NflInjuryReportProvider(
         }
         catch (JsonException exception)
         {
+            logger.LogWarning(exception, "Provider {Provider} injury report contained malformed JSON.", Name);
             return ProviderResult<IReadOnlyList<InjuryReportRecord>>.Failure(
                 ProviderAvailability.Invalid, Name, response.ObservedAt, "MALFORMED_RESPONSE", exception.Message);
         }
@@ -69,7 +76,7 @@ public sealed class NflInjuryReportProvider(
             "<t[dh][^>]*>(?<value>.*?)</t[dh]>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         var sectionPattern = new Regex(
-            "<section[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit[^\"']*[\"'][^>]*>(?<body>.*?)(?=<section[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit|</main>|$)",
+            "<(?:section|div)[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit[^\"']*[\"'][^>]*>(?<body>.*?)(?=<(?:section|div)[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit|</main>|$)",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         var tablePattern = new Regex(
             "<table[^>]*>(?<table>.*?)</table>",
@@ -116,7 +123,7 @@ public sealed class NflInjuryReportProvider(
     {
         var match = Regex.Match(
             section,
-            "d3-o-section-sub-title[^>]*>\\s*<span[^>]*>\\s*(?<team>[^<]+)",
+            "(?:d3-o-section-sub-title|nfl-o-injury-report__team)[^>]*>\\s*(?:<[^>]+>\\s*)?(?<team>[^<]+)",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         return match.Success ? WebUtility.HtmlDecode(match.Groups["team"].Value.Trim()) : null;
     }

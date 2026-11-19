@@ -23,6 +23,7 @@ public sealed class SleeperDataProvider(
         var value = response.Value;
         if (response.Availability != ProviderAvailability.Available || value.ValueKind != JsonValueKind.Object)
         {
+            logger.LogWarning("Provider {Provider} returned {Availability} for resource user.", Name, response.Availability);
             return Failure<SleeperUser>(response.Availability, response.ObservedAt);
         }
 
@@ -31,9 +32,15 @@ public sealed class SleeperDataProvider(
             value.GetString("username") ?? username,
             value.GetString("display_name"));
         return string.IsNullOrWhiteSpace(user.UserId)
-            ? ProviderResult<SleeperUser>.Failure(
-                ProviderAvailability.Invalid, Name, response.ObservedAt, "INVALID_USER", "Sleeper user response omitted user_id.")
+            ? InvalidUser(response.ObservedAt)
             : ProviderResult<SleeperUser>.AvailableResult(user, Name, response.ObservedAt, response.FreshUntil);
+    }
+
+    private ProviderResult<SleeperUser> InvalidUser(DateTimeOffset observedAt)
+    {
+        logger.LogWarning("Provider {Provider} returned a user payload without the required user_id field.", Name);
+        return ProviderResult<SleeperUser>.Failure(
+                ProviderAvailability.Invalid, Name, observedAt, "INVALID_USER", "Sleeper user response omitted user_id.");
     }
 
     public async Task<ProviderResult<IReadOnlyList<LeagueSummary>>> GetLeaguesAsync(
@@ -54,6 +61,11 @@ public sealed class SleeperDataProvider(
             .Where(x => x is not null)
             .Cast<LeagueSummary>()
             .ToArray();
+        logger.LogInformation("Provider {Provider} resource leagues produced {RecordCount} records.", Name, leagues.Length);
+        if (leagues.Length == 0)
+        {
+            logger.LogWarning("Provider {Provider} returned an empty leagues payload.", Name);
+        }
         return leagues.Length == 0
             ? ProviderResult<IReadOnlyList<LeagueSummary>>.EmptyResult(Name, response.ObservedAt, response.FreshUntil)
             : ProviderResult<IReadOnlyList<LeagueSummary>>.AvailableResult(leagues, Name, response.ObservedAt, response.FreshUntil);
@@ -87,6 +99,7 @@ public sealed class SleeperDataProvider(
         }
 
         var rosters = response.Value.Select(ParseRoster).Where(x => x is not null).Cast<RosterRecord>().ToArray();
+        logger.LogInformation("Provider {Provider} resource rosters produced {RecordCount} records.", Name, rosters.Length);
         return rosters.Length == 0
             ? ProviderResult<IReadOnlyList<RosterRecord>>.EmptyResult(Name, response.ObservedAt, response.FreshUntil)
             : ProviderResult<IReadOnlyList<RosterRecord>>.AvailableResult(rosters, Name, response.ObservedAt, response.FreshUntil);
@@ -178,6 +191,7 @@ public sealed class SleeperDataProvider(
             .Select(pair => (pair.Key, Player: ParsePlayer(pair.Key, pair.Value)))
             .Where(x => x.Player is not null)
             .ToDictionary(x => x.Key, x => x.Player!);
+        logger.LogInformation("Provider {Provider} resource players/nfl produced {RecordCount} records.", Name, players.Count);
         return players.Count == 0
             ? ProviderResult<IReadOnlyDictionary<string, PlayerRecord>>.EmptyResult(Name, response.ObservedAt, response.FreshUntil)
             : ProviderResult<IReadOnlyDictionary<string, PlayerRecord>>.AvailableResult(players, Name, response.ObservedAt, response.FreshUntil);

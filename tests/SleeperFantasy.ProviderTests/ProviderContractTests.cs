@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SleeperFantasy.Application.Providers;
 using SleeperFantasy.Application.Features.LeagueSetup;
 using SleeperFantasy.Application.Abstractions;
@@ -13,7 +14,16 @@ public sealed class ProviderContractTests
     [Fact]
     public async Task Provider_interfaces_can_be_substituted_with_fixture_adapter()
     {
-        ILeagueDataProvider provider = new FixtureLeagueProvider();
+        using var fixture = JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "sleeper-user.json")));
+        var user = fixture.RootElement;
+        ILeagueDataProvider provider = new FixtureLeagueProvider
+        {
+            User = new SleeperUser(
+                user.GetProperty("user_id").GetString()!,
+                user.GetProperty("username").GetString()!,
+                user.GetProperty("display_name").GetString())
+        };
 
         var result = await provider.GetUserAsync("fixture-user", CancellationToken.None);
 

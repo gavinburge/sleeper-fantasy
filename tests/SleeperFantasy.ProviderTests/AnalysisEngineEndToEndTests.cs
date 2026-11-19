@@ -208,9 +208,14 @@ public sealed class AnalysisEngineEndToEndTests
                     + "g1,2026,5,2026-10-10,ABC,DEF,REG\n",
                 "stats_player/stats_player_week_2026.csv" =>
                     "player_id,position,season,week,season_type,team,receptions,targets,carries,fantasy_points,fantasy_points_ppr\n"
-                    + "rostered,RB,2026,4,REG,ABC,2,3,15,10,12\n"
-                    + "free,RB,2026,4,REG,ABC,5,7,18,12,17\n"
-                    + "rostered,RB,2026,5,REG,ABC,3,4,16,11,14\n",
+                    + "00-ROSTERED,RB,2026,4,REG,ABC,2,3,15,10,12\n"
+                    + "00-FREE,WR,2026,4,REG,ABC,5,7,18,12,17\n"
+                    + "00-ROSTERED,RB,2026,5,REG,ABC,3,4,16,11,14\n",
+                "weekly_rosters/roster_weekly_2026.csv" =>
+                    "gsis_id,full_name,team,position,week\n"
+                    + "00-ROSTERED,Rostered Player,XYZ,RB,4\n"
+                    + "00-ROSTERED,Rostered Player,ABC,RB,5\n"
+                    + "00-FREE,Free Player,ABC,WR,5\n",
                 _ => string.Empty
             };
             return new HttpResponseMessage(HttpStatusCode.OK)

@@ -3,6 +3,7 @@ using SleeperFantasy.Domain.Analysis;
 using SleeperFantasy.Domain.Entities;
 using SleeperFantasy.Domain.Providers;
 using SleeperFantasy.Application.Providers;
+using Microsoft.Extensions.Logging;
 
 namespace SleeperFantasy.Application.Features.Analysis;
 
@@ -10,7 +11,8 @@ public sealed class SourceRefreshService(
     ILeagueDataProvider leagueProvider,
     IPerformanceDataProvider performanceProvider,
     IInjuryDataProvider injuryProvider,
-    IPlayerIdentityResolver? identityResolver = null)
+    IPlayerIdentityResolver? identityResolver = null,
+    ILogger<SourceRefreshService>? logger = null)
 {
     public async Task<SourceRefreshResult> RefreshAsync(
         ManagerConfiguration configuration,
@@ -133,6 +135,18 @@ public sealed class SourceRefreshService(
             externalRosterTask.Result,
             evidence);
 
+        logger?.LogInformation(
+            "Source refresh completed with {FailureCount} failures, {EvidenceCount} evidence items, and {IdentityMatchCount} identity matches.",
+            failures.Count,
+            evidence.Count,
+            identityMap.Count);
+        if (failures.Count > 0)
+        {
+            logger?.LogWarning(
+                "Source refresh completed partially: {FailureCount} source outcomes were unavailable or invalid.",
+                failures.Count);
+        }
+
         return new SourceRefreshResult(
             snapshot,
             NormalizePerformance((currentPerformanceTask.Result.Value ?? [])
@@ -170,6 +184,8 @@ public sealed class SourceRefreshService(
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var claims = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var conflicted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unmatched = 0;
+        var ambiguous = 0;
         foreach (var player in players.Values)
         {
             if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(player.PlayerId))
@@ -222,6 +238,14 @@ public sealed class SourceRefreshService(
 
             if (match.Warning is not null)
             {
+                if (match.IsAmbiguous)
+                {
+                    ambiguous++;
+                }
+                else
+                {
+                    unmatched++;
+                }
                 evidence.Add(new EvidenceItem(
                     $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
                     performanceProvider.ProviderName,
@@ -235,6 +259,14 @@ public sealed class SourceRefreshService(
                     ProviderAvailability.Unavailable));
             }
         }
+
+        logger?.LogInformation(
+            "Identity resolution for provider {Provider} produced {MatchedCount} matches, {UnmatchedCount} unmatched, {AmbiguousCount} ambiguous, and {CollisionCount} collisions.",
+            performanceProvider.ProviderName,
+            map.Count,
+            unmatched,
+            ambiguous,
+            conflicted.Count);
 
         return map;
     }

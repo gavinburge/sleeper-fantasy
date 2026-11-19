@@ -56,6 +56,7 @@ public sealed class NflverseDataProvider(
         var response = await GetTextAsync(path, cancellationToken);
         if (response.Availability == ProviderAvailability.Empty)
         {
+            logger.LogWarning("Provider {Provider} resource {Resource} returned an empty payload.", Name, path);
             return ProviderResult<IReadOnlyList<T>>.EmptyResult(
                 Name,
                 response.ObservedAt,
@@ -64,6 +65,7 @@ public sealed class NflverseDataProvider(
 
         if (response.Availability != ProviderAvailability.Available || response.Value is null)
         {
+            logger.LogWarning("Provider {Provider} resource {Resource} returned {Availability} data.", Name, path, response.Availability);
             return ProviderResult<IReadOnlyList<T>>.Failure(
                 response.Availability,
                 Name,
@@ -75,12 +77,14 @@ public sealed class NflverseDataProvider(
         try
         {
             var records = parser(ParseCsv(response.Value));
+            logger.LogInformation("Provider {Provider} resource {Resource} produced {RecordCount} records.", Name, path, records.Count);
             return records.Count == 0
                 ? ProviderResult<IReadOnlyList<T>>.EmptyResult(Name, response.ObservedAt, response.FreshUntil)
                 : ProviderResult<IReadOnlyList<T>>.AvailableResult(records, Name, response.ObservedAt, response.FreshUntil);
         }
         catch (FormatException exception)
         {
+            logger.LogWarning(exception, "Provider {Provider} resource {Resource} contained malformed CSV.", Name, path);
             return ProviderResult<IReadOnlyList<T>>.Failure(
                 ProviderAvailability.Invalid,
                 Name,
