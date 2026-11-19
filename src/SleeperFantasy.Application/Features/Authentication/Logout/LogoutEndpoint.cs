@@ -23,6 +23,13 @@ public static class LogoutEndpoint
 
             await session.SignOutAsync();
             return Results.NoContent();
-        }).RequireAuthorization();
+        })
+            .RequireAuthorization()
+            .WithName("Logout")
+            .WithSummary("Sign out the administrator")
+            .WithDescription("Clears the authenticated session cookie. Requires the antiforgery token.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized);
     }
 }

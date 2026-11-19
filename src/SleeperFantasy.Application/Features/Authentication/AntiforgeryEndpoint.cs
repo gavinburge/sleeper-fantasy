@@ -11,6 +11,10 @@ public static class AntiforgeryEndpoint
         {
             var tokens = antiforgery.GetAndStoreTokens(context);
             return Results.Ok(new { token = tokens.RequestToken });
-        });
+        })
+            .WithName("GetAntiforgeryToken")
+            .WithSummary("Get an antiforgery token")
+            .WithDescription("Sets the antiforgery cookie and returns the matching request token required for state-changing requests.")
+            .Produces(StatusCodes.Status200OK);
     }
 }

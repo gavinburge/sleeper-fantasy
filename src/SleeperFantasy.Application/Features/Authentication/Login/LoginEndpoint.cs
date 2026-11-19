@@ -35,6 +35,13 @@ public static class LoginEndpoint
                 cancellationToken);
 
             return signedIn ? Results.Ok() : Results.Unauthorized();
-        });
+        })
+            .WithName("Login")
+            .WithSummary("Sign in the administrator")
+            .WithDescription("Authenticates with the development or configured administrator account and issues an HTTP-only session cookie. The successful response has no body.")
+            .Accepts<LoginRequest>("application/json")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized);
     }
 }

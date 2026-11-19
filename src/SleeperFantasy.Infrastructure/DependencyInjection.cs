@@ -92,9 +92,9 @@ public static class DependencyInjection
                 options.Password.RequireNonAlphanumeric = true;
             })
             .AddRoles<IdentityRole>()
-            .AddEntityFrameworkStores<AppDbContext>();
-
-        services.AddScoped<SignInManager<ApplicationUser>>();
+            .AddEntityFrameworkStores<AppDbContext>()
+            .AddSignInManager()
+            .AddDefaultTokenProviders();
         services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;

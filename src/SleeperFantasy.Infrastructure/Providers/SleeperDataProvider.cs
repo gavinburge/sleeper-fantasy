@@ -19,7 +19,7 @@ public sealed class SleeperDataProvider(
         string username,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<JsonElement>($"user/{Uri.EscapeDataString(username)}", cancellationToken);
+        var response = await GetSleeperJsonAsync<JsonElement>($"user/{Uri.EscapeDataString(username)}", cancellationToken);
         var value = response.Value;
         if (response.Availability != ProviderAvailability.Available || value.ValueKind != JsonValueKind.Object)
         {
@@ -41,7 +41,7 @@ public sealed class SleeperDataProvider(
         string season,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<List<JsonElement>>(
+        var response = await GetSleeperJsonAsync<List<JsonElement>>(
             $"user/{Uri.EscapeDataString(userId)}/leagues/nfl/{Uri.EscapeDataString(season)}",
             cancellationToken);
         if (response.Value is null)
@@ -63,7 +63,7 @@ public sealed class SleeperDataProvider(
         string leagueId,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<JsonElement>($"league/{Uri.EscapeDataString(leagueId)}", cancellationToken);
+        var response = await GetSleeperJsonAsync<JsonElement>($"league/{Uri.EscapeDataString(leagueId)}", cancellationToken);
         var value = response.Value;
         if (response.Availability != ProviderAvailability.Available || value.ValueKind != JsonValueKind.Object)
         {
@@ -80,7 +80,7 @@ public sealed class SleeperDataProvider(
         string leagueId,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<List<JsonElement>>($"league/{Uri.EscapeDataString(leagueId)}/rosters", cancellationToken);
+        var response = await GetSleeperJsonAsync<List<JsonElement>>($"league/{Uri.EscapeDataString(leagueId)}/rosters", cancellationToken);
         if (response.Value is null)
         {
             return Failure<IReadOnlyList<RosterRecord>>(response.Availability, response.ObservedAt);
@@ -96,7 +96,7 @@ public sealed class SleeperDataProvider(
         string leagueId,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<JsonElement>($"league/{Uri.EscapeDataString(leagueId)}", cancellationToken);
+        var response = await GetSleeperJsonAsync<JsonElement>($"league/{Uri.EscapeDataString(leagueId)}", cancellationToken);
         var value = response.Value;
         if (response.Availability != ProviderAvailability.Available || value.ValueKind != JsonValueKind.Object)
         {
@@ -112,7 +112,7 @@ public sealed class SleeperDataProvider(
         int week,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<List<JsonElement>>(
+        var response = await GetSleeperJsonAsync<List<JsonElement>>(
             $"league/{Uri.EscapeDataString(leagueId)}/matchups/{week}",
             cancellationToken);
         if (response.Value is null)
@@ -138,7 +138,7 @@ public sealed class SleeperDataProvider(
         int round,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<List<JsonElement>>(
+        var response = await GetSleeperJsonAsync<List<JsonElement>>(
             $"league/{Uri.EscapeDataString(leagueId)}/transactions/{round}",
             cancellationToken);
         if (response.Value is null)
@@ -165,7 +165,7 @@ public sealed class SleeperDataProvider(
     public async Task<ProviderResult<IReadOnlyDictionary<string, PlayerRecord>>> GetPlayersAsync(
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<Dictionary<string, JsonElement>>("players/nfl", cancellationToken);
+        var response = await GetSleeperJsonAsync<Dictionary<string, JsonElement>>("players/nfl", cancellationToken);
         if (response.Value is null)
         {
             return Failure<IReadOnlyDictionary<string, PlayerRecord>>(response.Availability, response.ObservedAt);
@@ -182,7 +182,7 @@ public sealed class SleeperDataProvider(
 
     public async Task<ProviderResult<LeagueState>> GetStateAsync(CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<JsonElement>("state/nfl", cancellationToken);
+        var response = await GetSleeperJsonAsync<JsonElement>("state/nfl", cancellationToken);
         var value = response.Value;
         if (response.Availability != ProviderAvailability.Available || value.ValueKind != JsonValueKind.Object)
         {
@@ -204,7 +204,7 @@ public sealed class SleeperDataProvider(
         int lookbackHours,
         CancellationToken cancellationToken)
     {
-        var response = await GetJsonAsync<List<JsonElement>>(
+        var response = await GetSleeperJsonAsync<List<JsonElement>>(
             $"players/{Uri.EscapeDataString(sport)}/trending/{Uri.EscapeDataString(type)}?lookback_hours={lookbackHours}",
             cancellationToken);
         if (response.Value is null)
@@ -338,12 +338,22 @@ public sealed class SleeperDataProvider(
             observedAt,
             availability.ToString().ToUpperInvariant(),
             $"The {Name} provider returned {availability.ToString().ToLowerInvariant()} data.");
+
+    private Task<ProviderResponse<T>> GetSleeperJsonAsync<T>(
+        string resourceKey,
+        CancellationToken cancellationToken) =>
+        GetJsonAsync<T>($"v1/{resourceKey}", cancellationToken);
 }
 
 internal static class JsonElementExtensions
 {
     public static string? GetString(this JsonElement value, string property) =>
-        value.TryGetProperty(property, out var element) && element.ValueKind == JsonValueKind.String
-            ? element.GetString()
+        value.TryGetProperty(property, out var element)
+            ? element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number => element.ToString(),
+                _ => null
+            }
             : null;
 }

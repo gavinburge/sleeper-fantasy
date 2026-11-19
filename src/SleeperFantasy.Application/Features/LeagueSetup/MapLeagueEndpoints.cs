@@ -24,9 +24,18 @@ public static class LeagueEndpointMapping
                 : Results.Json(
                     new { error = result.ErrorCode, message = result.ErrorMessage },
                     statusCode: result.StatusCode);
-        });
+        })
+            .WithName("DiscoverLeagues")
+            .WithSummary("Discover a manager's Sleeper leagues")
+            .WithDescription("Resolves a Sleeper username for a season and returns selectable leagues and rosters. No configuration is saved.")
+            .Produces<LeagueDiscoveryResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status429TooManyRequests)
+            .Produces(StatusCodes.Status502BadGateway)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
 
-        league.MapGet("/", async (
+        league.MapGet("", async (
             ClaimsPrincipal user,
             LeagueConfigurationService service,
             CancellationToken cancellationToken) =>
@@ -41,7 +50,13 @@ public static class LeagueEndpointMapping
             return configuration is null
                 ? Results.NotFound(new { error = "CONFIGURATION_NOT_FOUND" })
                 : Results.Ok(configuration);
-        });
+        })
+            .WithName("GetLeagueConfiguration")
+            .WithSummary("Get the saved league configuration")
+            .WithDescription("Returns the authenticated manager's selected Sleeper user, league, roster, season, and configuration timestamp.")
+            .Produces<LeagueConfigurationResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound);
 
         league.MapPost("/configuration", async (
             LeagueConfigurationRequest request,
@@ -76,7 +91,19 @@ public static class LeagueEndpointMapping
                 : Results.Json(
                     new { error = result.ErrorCode, message = result.ErrorMessage },
                     statusCode: result.StatusCode);
-        });
+        })
+            .WithName("SaveLeagueConfiguration")
+            .WithSummary("Save the selected Sleeper league and roster")
+            .WithDescription("Validates the selected league and manager-owned roster, then persists the configuration. Sleeper credentials are never accepted or stored.")
+            .Accepts<LeagueConfigurationRequest>("application/json")
+            .Produces<LeagueConfigurationResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status409Conflict)
+            .Produces(StatusCodes.Status422UnprocessableEntity)
+            .Produces(StatusCodes.Status429TooManyRequests)
+            .Produces(StatusCodes.Status502BadGateway)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return endpoints;
     }
