@@ -163,6 +163,11 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AnalysisRunId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Availability")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
                     b.Property<string>("EvidenceType")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -170,6 +175,13 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("FreshUntil")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdentityKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsStale")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTimeOffset>("ObservedAt")
                         .HasColumnType("timestamp with time zone");
@@ -204,8 +216,15 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AnalysisRunId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("Confidence")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)");
+
                     b.Property<DateTimeOffset>("GeneratedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsStale")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("ResultJson")
                         .IsRequired()
@@ -215,6 +234,10 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<string>("SourceManifestJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
 
                     b.HasKey("Id");
 

@@ -25,12 +25,12 @@
 
 ## 4. Analysis domain and ranking
 
-- [ ] 4.1 Implement source refresh and normalized evidence aggregation with freshness, provenance, identity, and partial-failure metadata; verify stale and unavailable signals remain explicit.
-- [ ] 4.2 Implement deterministic roster-risk analysis using league scoring, roster positions, starters, bye weeks, injury status, practice status, and recent performance; verify focused cases for bye, injury, missing data, and offseason league state.
-- [ ] 4.3 Implement available-player derivation from all league rosters and position eligibility; verify rostered players, invalid records, and incomplete roster snapshots are handled correctly.
-- [ ] 4.4 Implement waiver ranking using roster need, replacement level, opportunity signals, matchup/context, and evidence quality; verify ranking changes with scoring settings and identifies evidence conflicts.
-- [ ] 4.5 Implement structured LLM evidence bundling and result merging so explanations reference evidence IDs, include confidence and caveats, and never replace deterministic facts; verify the deterministic result survives model failure.
-- [ ] 4.6 Persist completed reviews, evidence manifests, source timestamps, confidence, stale markers, and prior successful results; verify failed refreshes do not overwrite a valid result with an empty success.
+- [x] 4.1 Implement source refresh and normalized evidence aggregation with freshness, provenance, identity, and partial-failure metadata; verify stale and unavailable signals remain explicit.
+- [x] 4.2 Implement deterministic roster-risk analysis using league scoring, roster positions, starters, bye weeks, injury status, practice status, and recent performance; verify focused cases for bye, injury, missing data, and offseason league state.
+- [x] 4.3 Implement available-player derivation from all league rosters and position eligibility; verify rostered players, invalid records, and incomplete roster snapshots are handled correctly.
+- [x] 4.4 Implement waiver ranking using roster need, replacement level, opportunity signals, matchup/context, and evidence quality; verify ranking changes with scoring settings and identifies evidence conflicts.
+- [x] 4.5 Implement structured LLM evidence bundling and result merging so explanations reference evidence IDs, include confidence and caveats, and never replace deterministic facts; verify the deterministic result survives model failure.
+- [x] 4.6 Persist completed reviews, evidence manifests, source timestamps, confidence, stale markers, and prior successful results; verify failed refreshes do not overwrite a valid result with an empty success.
 
 ## 5. Asynchronous analysis API and worker
 

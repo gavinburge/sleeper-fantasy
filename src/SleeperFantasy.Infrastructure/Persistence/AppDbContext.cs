@@ -72,7 +72,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Provider).HasMaxLength(100).IsRequired();
             entity.Property(x => x.EvidenceType).HasMaxLength(100).IsRequired();
             entity.Property(x => x.SubjectKey).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.IdentityKey).HasMaxLength(200);
             entity.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.Availability).HasMaxLength(30).IsRequired();
             entity.HasIndex(x => new { x.AnalysisRunId, x.SubjectKey });
             entity.HasOne<AnalysisRun>()
                 .WithMany()
@@ -85,6 +87,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasKey(x => x.Id);
             entity.Property(x => x.ResultJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.ResultVersion).HasMaxLength(50).IsRequired();
+            entity.Property(x => x.Confidence).HasPrecision(5, 4);
+            entity.Property(x => x.SourceManifestJson).HasColumnType("jsonb").IsRequired();
             entity.HasIndex(x => x.AnalysisRunId).IsUnique();
             entity.HasOne(x => x.AnalysisRun)
                 .WithOne(x => x.Result)
