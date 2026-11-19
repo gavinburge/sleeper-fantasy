@@ -19,13 +19,15 @@ public sealed class LanguageModelAnalysisServiceTests
                 DateTimeOffset.UtcNow)
         };
 
+        var deterministic = new AnalysisFixture().Deterministic;
         var review = await new LanguageModelAnalysisService(model)
-            .MergeAsync("analysis", new AnalysisFixture().Deterministic, CancellationToken.None);
+            .MergeAsync("analysis", deterministic, CancellationToken.None);
 
         var finding = Assert.Single(review.ContextualAnalysis!.Findings);
         Assert.Equal(["evidence-1"], finding.EvidenceIds);
         Assert.Equal(1m, finding.Confidence);
         Assert.True(review.ContextualAnalysisAvailable);
+        Assert.Same(deterministic, review.Deterministic);
     }
 
     [Fact]
@@ -39,6 +41,21 @@ public sealed class LanguageModelAnalysisServiceTests
         Assert.False(review.ContextualAnalysisAvailable);
         Assert.Same(deterministic, review.Deterministic);
         Assert.Contains("unavailable", review.Caveats.Single(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Model_failure_preserves_deterministic_stale_state()
+    {
+        var fixture = new AnalysisFixture();
+        var deterministic = fixture.Deterministic with
+        {
+            Evidence = [fixture.Evidence with { FreshUntil = DateTimeOffset.UtcNow.AddMinutes(-1) }]
+        };
+
+        var review = await new LanguageModelAnalysisService(new FailingLanguageModelProvider())
+            .MergeAsync("analysis", deterministic, CancellationToken.None);
+
+        Assert.True(review.IsStale);
     }
 
     private sealed class FailingLanguageModelProvider : ILanguageModelProvider

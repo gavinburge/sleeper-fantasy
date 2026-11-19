@@ -13,7 +13,8 @@ public sealed record LanguageModelRequest(
     string AnalysisId,
     string SystemInstruction,
     string UserPrompt,
-    IReadOnlyList<LanguageModelEvidence> Evidence);
+    IReadOnlyList<LanguageModelEvidence> Evidence,
+    string DeterministicSummary = "");
 
 public sealed record LanguageModelFinding(
     string SubjectKey,

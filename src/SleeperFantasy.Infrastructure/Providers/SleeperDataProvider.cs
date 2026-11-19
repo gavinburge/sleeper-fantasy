@@ -104,7 +104,10 @@ public sealed class SleeperDataProvider(
         }
 
         var settings = ParseSettings(leagueId, value);
-        return ProviderResult<LeagueSettings>.AvailableResult(settings, Name, response.ObservedAt, response.FreshUntil);
+        return settings is null
+            ? ProviderResult<LeagueSettings>.Failure(
+                ProviderAvailability.Invalid, Name, response.ObservedAt, "INVALID_SETTINGS", "Sleeper league settings payload was invalid.")
+            : ProviderResult<LeagueSettings>.AvailableResult(settings, Name, response.ObservedAt, response.FreshUntil);
     }
 
     public async Task<ProviderResult<IReadOnlyList<MatchupRecord>>> GetMatchupsAsync(
@@ -189,12 +192,19 @@ public sealed class SleeperDataProvider(
             return Failure<LeagueState>(response.Availability, response.ObservedAt);
         }
 
+        var week = value.GetString("week");
+        if (!int.TryParse(week, out var parsedWeek) || parsedWeek < 1)
+        {
+            return ProviderResult<LeagueState>.Failure(
+                ProviderAvailability.Invalid, Name, response.ObservedAt, "INVALID_REQUIRED_WEEK", "Sleeper state omitted a valid week.");
+        }
+
         var state = new LeagueState(
             value.GetString("sport") ?? "nfl",
             value.GetString("season") ?? string.Empty,
             value.GetString("week") ?? string.Empty,
             value.GetString("season_type") ?? string.Empty,
-            value.GetString("display_week"));
+            value.GetString("display_week") ?? week);
         return ProviderResult<LeagueState>.AvailableResult(state, Name, response.ObservedAt, response.FreshUntil);
     }
 
@@ -226,6 +236,12 @@ public sealed class SleeperDataProvider(
     private static LeagueSummary? ParseLeague(JsonElement value)
     {
         var id = value.GetString("league_id");
+        if (value.TryGetProperty("scoring_settings", out var scoring)
+            && scoring.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
         return string.IsNullOrWhiteSpace(id)
             ? null
             : new LeagueSummary(
@@ -235,7 +251,9 @@ public sealed class SleeperDataProvider(
                 value.GetString("status") ?? "unknown",
                 value.GetString("sport") ?? "nfl",
                 value.TryGetProperty("total_rosters", out var rosters) && rosters.TryGetInt32(out var total) ? total : 0,
-                value.GetString("scoring_settings") is null ? null : "custom");
+                scoring.ValueKind == JsonValueKind.Object
+                    ? "custom"
+                    : value.GetString("scoring_settings"));
     }
 
     private static RosterRecord? ParseRoster(JsonElement value)
@@ -253,13 +271,21 @@ public sealed class SleeperDataProvider(
                 value.TryGetProperty("settings", out settings) ? ReadInt(settings, "losses") : null,
                 value.TryGetProperty("settings", out settings) ? ReadInt(settings, "ties") : null,
                 value.TryGetProperty("settings", out settings) ? ReadDecimal(settings, "fpts") : null,
-                value.TryGetProperty("metadata", out var metadata) ? metadata.GetString("team_name") : null);
+                value.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object
+                    ? metadata.GetString("team_name")
+                    : null);
     }
 
-    private static LeagueSettings ParseSettings(string leagueId, JsonElement value)
+    private static LeagueSettings? ParseSettings(string leagueId, JsonElement value)
     {
         var values = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-        if (value.TryGetProperty("scoring_settings", out var scoring))
+        if (value.TryGetProperty("scoring_settings", out var scoring)
+            && scoring.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (value.TryGetProperty("scoring_settings", out scoring))
         {
             foreach (var item in scoring.EnumerateObject())
             {
@@ -271,11 +297,17 @@ public sealed class SleeperDataProvider(
         }
 
         var positions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        if (value.TryGetProperty("roster_positions", out var rosterPositions))
+        if (value.TryGetProperty("roster_positions", out var rosterPositions)
+            && rosterPositions.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        if (value.TryGetProperty("roster_positions", out rosterPositions))
         {
             foreach (var position in rosterPositions.EnumerateArray())
             {
-                var name = position.GetString();
+                var name = position.ValueKind == JsonValueKind.String ? position.GetString() : null;
                 if (!string.IsNullOrWhiteSpace(name))
                 {
                     positions[name] = positions.TryGetValue(name, out var count) ? count + 1 : 1;
@@ -317,7 +349,7 @@ public sealed class SleeperDataProvider(
         }
 
         return array.EnumerateArray()
-            .Select(x => x.GetString())
+            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Cast<string>()
             .ToArray();

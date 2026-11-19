@@ -85,7 +85,10 @@ public sealed class WaiverRankingService
                 var opportunity = usageRecord.Usage
                     .Where(x => x.Key.Contains("snap", StringComparison.OrdinalIgnoreCase)
                         || x.Key.Contains("route", StringComparison.OrdinalIgnoreCase)
-                        || x.Key.Contains("touch", StringComparison.OrdinalIgnoreCase))
+                        || x.Key.Contains("touch", StringComparison.OrdinalIgnoreCase)
+                        || x.Key.Contains("target", StringComparison.OrdinalIgnoreCase)
+                        || x.Key.Equals("carries", StringComparison.OrdinalIgnoreCase)
+                        || x.Key.Equals("receptions", StringComparison.OrdinalIgnoreCase))
                     .Select(x => x.Value)
                     .DefaultIfEmpty()
                     .Max();

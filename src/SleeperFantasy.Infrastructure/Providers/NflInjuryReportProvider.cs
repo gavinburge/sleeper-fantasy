@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;
@@ -64,41 +65,60 @@ public sealed class NflInjuryReportProvider(
         }
 
         var records = new List<InjuryReportRecord>();
-        var rowPattern = new Regex(
-            "<tr[^>]*>(?<cells>.*?)</tr>",
-            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         var cellPattern = new Regex(
             "<t[dh][^>]*>(?<value>.*?)</t[dh]>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-        foreach (Match row in rowPattern.Matches(body))
+        var sectionPattern = new Regex(
+            "<section[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit[^\"']*[\"'][^>]*>(?<body>.*?)(?=<section[^>]*class\\s*=\\s*[\"'][^\"']*nfl-o-injury-report__unit|</main>|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        var tablePattern = new Regex(
+            "<table[^>]*>(?<table>.*?)</table>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        var rowPattern = new Regex(
+            "<tr[^>]*>(?<cells>.*?)</tr>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        foreach (Match section in sectionPattern.Matches(body))
         {
-            var cells = cellPattern.Matches(row.Groups["cells"].Value)
-                .Select(x => Regex.Replace(x.Groups["value"].Value, "<.*?>", string.Empty).Trim())
-                .Where(x => x.Length > 0)
-                .ToArray();
-            if (cells.Length < 4 || cells[0].Equals("Player", StringComparison.OrdinalIgnoreCase))
+            var team = ExtractTeam(section.Groups["body"].Value);
+            var table = tablePattern.Match(section.Groups["body"].Value);
+            if (!table.Success)
             {
                 continue;
             }
 
-            var status = ParseStatus(cells.FirstOrDefault(x =>
-                x.Equals("Out", StringComparison.OrdinalIgnoreCase)
-                || x.Equals("Doubtful", StringComparison.OrdinalIgnoreCase)
-                || x.Equals("Questionable", StringComparison.OrdinalIgnoreCase)
-                || x.Equals("Active", StringComparison.OrdinalIgnoreCase)));
-            records.Add(new InjuryReportRecord(
-                cells[0],
-                cells[0],
-                cells.ElementAtOrDefault(1),
-                cells.ElementAtOrDefault(2),
-                cells.ElementAtOrDefault(3),
-                cells.ElementAtOrDefault(4),
-                status,
-                observedAt,
-                sourceUrl));
+            foreach (Match row in rowPattern.Matches(table.Groups["table"].Value))
+            {
+                var cells = cellPattern.Matches(row.Groups["cells"].Value)
+                    .Select(x => WebUtility.HtmlDecode(Regex.Replace(x.Groups["value"].Value, "<.*?>", string.Empty).Trim()))
+                    .ToArray();
+                if (cells.Length < 5 || cells[0].Equals("Player", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                records.Add(new InjuryReportRecord(
+                    cells[0],
+                    cells[0],
+                    team,
+                    cells[1],
+                    cells[2],
+                    cells[3],
+                    ParseStatus(cells[4]),
+                    observedAt,
+                    sourceUrl));
+            }
         }
 
         return records;
+    }
+
+    private static string? ExtractTeam(string section)
+    {
+        var match = Regex.Match(
+            section,
+            "d3-o-section-sub-title[^>]*>\\s*<span[^>]*>\\s*(?<team>[^<]+)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        return match.Success ? WebUtility.HtmlDecode(match.Groups["team"].Value.Trim()) : null;
     }
 
     private static IReadOnlyList<InjuryReportRecord> ParseJson(

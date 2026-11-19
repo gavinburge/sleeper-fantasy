@@ -126,30 +126,66 @@ public sealed class NflverseDataProvider(
 
     private static IReadOnlyList<ExternalPlayerRecord> ParseRoster(
         IReadOnlyList<IReadOnlyDictionary<string, string>> rows) =>
-        rows.Select(row => new ExternalPlayerRecord(
+        rows.Select(row => new
+            {
+                Identity = Get(row, "gsis_id") ?? Get(row, "player_id") ?? string.Empty,
+                Row = row
+            })
+            .Where(x => x.Identity.Length > 0)
+            .GroupBy(x => x.Identity, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(x => ParseInt(Get(x.Row, "week")))
+                .Select(x => x.Row)
+                .First())
+            .Select(row => new ExternalPlayerRecord(
                 Get(row, "gsis_id") ?? Get(row, "player_id") ?? string.Empty,
                 Get(row, "full_name") ?? Get(row, "display_name"),
                 Get(row, "team") ?? Get(row, "team_abbr"),
                 Get(row, "position"),
                 Get(row, "gsis_id"),
                 DateTimeOffset.UtcNow))
-            .Where(x => x.ProviderPlayerId.Length > 0)
             .ToArray();
 
     private static IReadOnlyList<PlayerUsageRecord> ParseUsage(
         IReadOnlyList<IReadOnlyDictionary<string, string>> rows,
         string season) =>
-        rows.Select(row => new PlayerUsageRecord(
+        rows.Where(row => string.Equals(Get(row, "season"), season, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(row => Get(row, "player_id") ?? Get(row, "gsis_id") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(row => ParseInt(Get(row, "week")))
+                .First())
+            .Select(row => new PlayerUsageRecord(
                 Get(row, "player_id") ?? Get(row, "gsis_id") ?? string.Empty,
                 Get(row, "recent_team") ?? Get(row, "team"),
                 Get(row, "position"),
-                row.Where(x => x.Value is not null && decimal.TryParse(x.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+                BuildUsage(row)
                     .ToDictionary(
                         x => x.Key,
-                        x => decimal.Parse(x.Value, NumberStyles.Any, CultureInfo.InvariantCulture)),
+                        x => x.Value),
                 DateTimeOffset.UtcNow))
             .Where(x => x.ProviderPlayerId.Length > 0)
             .ToArray();
+
+    private static IReadOnlyDictionary<string, decimal> BuildUsage(
+        IReadOnlyDictionary<string, string> row)
+    {
+        var usage = row
+            .Where(x => x.Value is not null
+                && decimal.TryParse(x.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            .ToDictionary(
+                x => x.Key,
+                x => decimal.Parse(x.Value, NumberStyles.Any, CultureInfo.InvariantCulture),
+                StringComparer.OrdinalIgnoreCase);
+
+        var carries = usage.GetValueOrDefault("carries");
+        var receptions = usage.GetValueOrDefault("receptions");
+        if (carries > 0 || receptions > 0)
+        {
+            usage["touches"] = carries + receptions;
+        }
+
+        return usage;
+    }
 
     private static IReadOnlyList<IReadOnlyDictionary<string, string>> ParseCsv(string csv)
     {

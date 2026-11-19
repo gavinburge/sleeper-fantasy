@@ -2,13 +2,15 @@ using System.Text.Json;
 using SleeperFantasy.Domain.Analysis;
 using SleeperFantasy.Domain.Entities;
 using SleeperFantasy.Domain.Providers;
+using SleeperFantasy.Application.Providers;
 
 namespace SleeperFantasy.Application.Features.Analysis;
 
 public sealed class SourceRefreshService(
     ILeagueDataProvider leagueProvider,
     IPerformanceDataProvider performanceProvider,
-    IInjuryDataProvider injuryProvider)
+    IInjuryDataProvider injuryProvider,
+    IPlayerIdentityResolver? identityResolver = null)
 {
     public async Task<SourceRefreshResult> RefreshAsync(
         ManagerConfiguration configuration,
@@ -41,12 +43,13 @@ public sealed class SourceRefreshService(
                 performanceProvider.ProviderName,
                 DateTimeOffset.UtcNow));
         var usageTask = CaptureAsync(performanceProvider.ProviderName, () => performanceProvider.GetUsageAsync(configuration.Season.ToString(), cancellationToken));
+        var externalRosterTask = CaptureAsync(performanceProvider.ProviderName, () => performanceProvider.GetRostersAsync(configuration.Season.ToString(), cancellationToken));
         var injuriesTask = CaptureAsync(injuryProvider.ProviderName, () => injuryProvider.GetCurrentReportsAsync(cancellationToken));
 
         await Task.WhenAll(
             leagueTask, settingsTask, rostersTask, playersTask, matchupsTask,
             transactionsTask, trendingTask, scheduleTask, currentPerformanceTask,
-            priorPerformanceTask, usageTask, injuriesTask);
+            priorPerformanceTask, usageTask, externalRosterTask, injuriesTask);
 
         var failures = new List<SourceFailure>();
         var evidence = new List<EvidenceItem>();
@@ -63,6 +66,7 @@ public sealed class SourceRefreshService(
         AddFailure(currentPerformanceTask.Result, failures);
         AddFailure(priorPerformanceTask.Result, failures);
         AddFailure(usageTask.Result, failures);
+        AddFailure(externalRosterTask.Result, failures);
         AddFailure(injuriesTask.Result, failures);
 
         if (leagueTask.Result.Value is not null)
@@ -99,6 +103,7 @@ public sealed class SourceRefreshService(
         AddCollectionEvidence(evidence, currentPerformanceTask.Result, "performance", $"weekly-performance-{currentWeek}");
         AddCollectionEvidence(evidence, priorPerformanceTask.Result, "performance", $"weekly-performance-{currentWeek - 1}");
         AddCollectionEvidence(evidence, usageTask.Result, "usage", "player-usage");
+        AddCollectionEvidence(evidence, externalRosterTask.Result, "external-roster", "external-roster");
         AddCollectionEvidence(evidence, injuriesTask.Result, "injury", "injury-report");
         AddCollectionEvidence(evidence, trendingTask.Result, "trending", "trending-players");
 
@@ -121,18 +126,115 @@ public sealed class SourceRefreshService(
                 trendingTask.Result.Value ?? []);
         }
 
+        var externalRoster = DeduplicateExternalRoster(externalRosterTask.Result.Value ?? []);
+        var identityMap = BuildIdentityMap(
+            playersTask.Result.Value ?? new Dictionary<string, PlayerRecord>(),
+            externalRoster,
+            externalRosterTask.Result,
+            evidence);
+
         return new SourceRefreshResult(
             snapshot,
-            (currentPerformanceTask.Result.Value ?? [])
+            NormalizePerformance((currentPerformanceTask.Result.Value ?? [])
                 .Concat(priorPerformanceTask.Result.Value ?? [])
-                .ToArray(),
+                .ToArray(), identityMap),
             scheduleTask.Result.Value ?? [],
-            usageTask.Result.Value ?? [],
+            NormalizeUsage(usageTask.Result.Value ?? [], identityMap),
             injuriesTask.Result.Value ?? [],
             evidence,
             failures,
             DateTimeOffset.UtcNow);
     }
+
+    private static IReadOnlyList<ExternalPlayerRecord> DeduplicateExternalRoster(
+        IReadOnlyList<ExternalPlayerRecord> records) =>
+        records
+            .Where(record => !string.IsNullOrWhiteSpace(record.GsisId)
+                || !string.IsNullOrWhiteSpace(record.ProviderPlayerId))
+            .GroupBy(
+                record => !string.IsNullOrWhiteSpace(record.GsisId)
+                    ? record.GsisId!
+                    : record.ProviderPlayerId,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(record => record.ObservedAt)
+                .First())
+            .ToArray();
+
+    private Dictionary<string, string> BuildIdentityMap(
+        IReadOnlyDictionary<string, PlayerRecord> players,
+        IReadOnlyList<ExternalPlayerRecord> candidates,
+        ProviderResult<IReadOnlyList<ExternalPlayerRecord>> rosterResult,
+        ICollection<EvidenceItem> evidence)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var player in players.Values)
+        {
+            if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(player.PlayerId))
+            {
+                map[player.PlayerId] = player.PlayerId;
+                if (!rosterResult.IsSuccessful)
+                {
+                    evidence.Add(new EvidenceItem(
+                        $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
+                        performanceProvider.ProviderName,
+                        "identity-unavailable",
+                        player.PlayerId,
+                        $"External identity roster was unavailable; only the already-compatible ID {player.PlayerId} was preserved.",
+                        rosterResult.ObservedAt,
+                        null,
+                        null,
+                        player.PlayerId,
+                        rosterResult.Availability));
+                }
+
+                continue;
+            }
+
+            var match = (identityResolver ?? new PlayerIdentityResolver()).Resolve(
+                player,
+                candidates,
+                performanceProvider.ProviderName);
+            if (match.ProviderPlayerId is not null && !match.IsAmbiguous)
+            {
+                map[match.ProviderPlayerId] = match.SleeperPlayerId;
+                continue;
+            }
+
+            if (match.Warning is not null)
+            {
+                evidence.Add(new EvidenceItem(
+                    $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
+                    performanceProvider.ProviderName,
+                    match.IsAmbiguous ? "identity-conflict" : "identity-unavailable",
+                    player.PlayerId,
+                    match.Warning,
+                    DateTimeOffset.UtcNow,
+                    null,
+                    match.Confidence,
+                    player.PlayerId,
+                    ProviderAvailability.Unavailable));
+            }
+        }
+
+        return map;
+    }
+
+    private static IReadOnlyList<PlayerPerformanceRecord> NormalizePerformance(
+        IReadOnlyList<PlayerPerformanceRecord> records,
+        IReadOnlyDictionary<string, string> identityMap) =>
+        records
+            .Where(record => identityMap.ContainsKey(record.PlayerId))
+            .Select(record => record with { PlayerId = identityMap[record.PlayerId] })
+            .ToArray();
+
+    private static IReadOnlyList<PlayerUsageRecord> NormalizeUsage(
+        IReadOnlyList<PlayerUsageRecord> records,
+        IReadOnlyDictionary<string, string> identityMap) =>
+        records
+            .Where(record => identityMap.ContainsKey(record.ProviderPlayerId))
+            .Select(record => record with { ProviderPlayerId = identityMap[record.ProviderPlayerId] })
+            .ToArray();
 
     private static EvidenceItem CreateEvidence<T>(
         ProviderResult<T> result,

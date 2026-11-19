@@ -24,6 +24,11 @@ internal sealed class AnalysisFixture
     public readonly PlayerRecord FreePlayer =
         new("free", "Free Player", null, null, "WR", "ABC", null, null, null, true);
 
+    public IReadOnlyList<ExternalPlayerRecord> ExternalRoster { get; set; } = [];
+    public bool FailExternalRoster { get; set; }
+    public IReadOnlyDictionary<string, string> ExternalIds { get; set; } =
+        new Dictionary<string, string>();
+
     public LeagueSnapshot Snapshot => new(
         new LeagueSummary("league-1", "League", "2026", "in_season", "nfl", 2, null),
         new LeagueSettings(
@@ -56,8 +61,10 @@ internal sealed class AnalysisFixture
     public AnalysisReview Review =>
         new(Deterministic, null, false, ["model unavailable"], 0.9m, false, DateTimeOffset.UtcNow);
 
-    public SourceRefreshService CreateRefreshService(bool failInjuries = false, bool throwInjuries = false) =>
-        new(new StubLeagueProvider(this), new StubPerformanceProvider(), new StubInjuryProvider
+    public SourceRefreshService CreateRefreshService(
+        bool failInjuries = false,
+        bool throwInjuries = false) =>
+        new(new StubLeagueProvider(this), new StubPerformanceProvider(this), new StubInjuryProvider
         {
             Fail = failInjuries,
             Throw = throwInjuries
@@ -100,7 +107,7 @@ internal sealed class StubLeagueProvider(AnalysisFixture fixture) : ILeagueDataP
         Task.FromResult(ProviderResult<IReadOnlyList<TrendingPlayer>>.EmptyResult(ProviderName, DateTimeOffset.UtcNow));
 }
 
-internal sealed class StubPerformanceProvider : IPerformanceDataProvider
+internal sealed class StubPerformanceProvider(AnalysisFixture fixture) : IPerformanceDataProvider
 {
     public string ProviderName => "fixture-performance";
 
@@ -110,17 +117,36 @@ internal sealed class StubPerformanceProvider : IPerformanceDataProvider
     public Task<ProviderResult<IReadOnlyList<PlayerPerformanceRecord>>> GetWeeklyPlayerStatsAsync(string season, int week, CancellationToken cancellationToken) =>
         Task.FromResult(ProviderResult<IReadOnlyList<PlayerPerformanceRecord>>.AvailableResult(
             week > 0
-                ? [new PlayerPerformanceRecord("rostered", "ABC", "RB", season, week,
-                    new Dictionary<string, decimal> { ["fantasy_points"] = 10m }, DateTimeOffset.UtcNow)]
+                ? (fixture.ExternalIds.TryGetValue("free", out var freeId)
+                    ? [
+                        new PlayerPerformanceRecord(fixture.ExternalIds.GetValueOrDefault("rostered", "rostered"), "ABC", "RB", season, week,
+                            new Dictionary<string, decimal> { ["fantasy_points"] = 10m }, DateTimeOffset.UtcNow),
+                        new PlayerPerformanceRecord(freeId, "ABC", "WR", season, week,
+                            new Dictionary<string, decimal> { ["fantasy_points"] = 12m, ["receptions"] = 5m }, DateTimeOffset.UtcNow)
+                    ]
+                    : [new PlayerPerformanceRecord(fixture.ExternalIds.GetValueOrDefault("rostered", "rostered"), "ABC", "RB", season, week,
+                        new Dictionary<string, decimal> { ["fantasy_points"] = 10m }, DateTimeOffset.UtcNow)])
                 : [],
             ProviderName,
             DateTimeOffset.UtcNow));
 
     public Task<ProviderResult<IReadOnlyList<ExternalPlayerRecord>>> GetRostersAsync(string season, CancellationToken cancellationToken) =>
-        Task.FromResult(ProviderResult<IReadOnlyList<ExternalPlayerRecord>>.AvailableResult([], ProviderName, DateTimeOffset.UtcNow));
+        Task.FromResult(fixture.FailExternalRoster
+            ? ProviderResult<IReadOnlyList<ExternalPlayerRecord>>.Failure(
+                ProviderAvailability.Unavailable,
+                ProviderName,
+                DateTimeOffset.UtcNow,
+                "ROSTER_UNAVAILABLE",
+                "fixture external roster unavailable")
+            : ProviderResult<IReadOnlyList<ExternalPlayerRecord>>.AvailableResult(fixture.ExternalRoster, ProviderName, DateTimeOffset.UtcNow));
 
     public Task<ProviderResult<IReadOnlyList<PlayerUsageRecord>>> GetUsageAsync(string season, CancellationToken cancellationToken) =>
-        Task.FromResult(ProviderResult<IReadOnlyList<PlayerUsageRecord>>.AvailableResult([], ProviderName, DateTimeOffset.UtcNow));
+        Task.FromResult(ProviderResult<IReadOnlyList<PlayerUsageRecord>>.AvailableResult(
+            fixture.ExternalIds.TryGetValue("free", out var freeId)
+                ? [new PlayerUsageRecord(freeId, "ABC", "WR", new Dictionary<string, decimal> { ["targets"] = 5m }, DateTimeOffset.UtcNow)]
+                : [],
+            ProviderName,
+            DateTimeOffset.UtcNow));
 }
 
 internal sealed class StubInjuryProvider : IInjuryDataProvider

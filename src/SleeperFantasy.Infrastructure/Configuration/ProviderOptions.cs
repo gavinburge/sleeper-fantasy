@@ -21,4 +21,6 @@ public sealed class ProviderOptions
     public string GeminiBaseUrl { get; set; } = "https://generativelanguage.googleapis.com/v1beta";
     public int LanguageModelTimeoutSeconds { get; set; } = 30;
     public int LanguageModelMaxPromptCharacters { get; set; } = 24000;
+    public int LanguageModelMaxRetries { get; set; } = 2;
+    public int LanguageModelRetryDelayMilliseconds { get; set; } = 250;
 }
