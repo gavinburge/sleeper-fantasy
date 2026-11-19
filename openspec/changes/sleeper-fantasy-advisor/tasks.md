@@ -56,6 +56,8 @@
 - [ ] 7.3 Add rate-limit, timeout, malformed-response, and secret-redaction tests across provider boundaries; verify failures are explicit and retry behavior is bounded.
 - [ ] 7.4 Add local and GCP run documentation for starting PostgreSQL, applying migrations, deploying the API, and executing the worker; verify a clean checkout can follow the documented steps.
 - [ ] 7.5 Run the project formatter, linter, type-check, unit tests, API tests, and end-to-end tests; verify all required checks pass before implementation is considered complete.
+- [ ] 7.6 Add a separate recommendation-quality evaluation suite using sanitized representative league snapshots and recorded model responses; verify risk labels, waiver ordering, evidence grounding, caveats, and deterministic-score authority without making pull-request tests depend on live providers or Gemini.
+- [ ] 7.7 Add scheduled provider smoke checks for Sleeper, nflverse, NFL injury reports, and configured model endpoints; verify availability, content types, required fields, representative record counts, source timestamps, parser warnings, and stale/empty responses without logging raw payloads or secrets.
 
 ## Workflow follow-up
 

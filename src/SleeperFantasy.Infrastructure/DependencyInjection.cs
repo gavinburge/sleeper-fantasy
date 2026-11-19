@@ -14,6 +14,7 @@ using SleeperFantasy.Domain.Providers;
 using SleeperFantasy.Infrastructure.Configuration;
 using SleeperFantasy.Infrastructure.Identity;
 using SleeperFantasy.Infrastructure.Persistence;
+using SleeperFantasy.Infrastructure.Providers;
 
 namespace SleeperFantasy.Infrastructure;
 
@@ -71,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<AnalysisOrchestrator>();
         services.AddScoped<AnalysisPersistenceService>();
         services.AddSingleton<IPlayerIdentityResolver, PlayerIdentityResolver>();
+        services.AddSingleton<IProviderResponseCache, ProviderResponseCache>();
 
         services.AddHttpClient<ILeagueDataProvider, Providers.SleeperDataProvider>((sp, client) =>
         {

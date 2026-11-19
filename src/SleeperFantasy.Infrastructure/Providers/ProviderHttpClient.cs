@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -12,12 +11,17 @@ namespace SleeperFantasy.Infrastructure.Providers;
 public abstract class ProviderHttpClient(
     HttpClient httpClient,
     IOptions<CacheOptions> cacheOptions,
-    ILogger logger)
+    ILogger logger,
+    IProviderResponseCache? sharedCache = null)
 {
     protected Uri? BaseAddress => httpClient.BaseAddress;
+    protected CacheOptions CacheSettings => cacheOptions.Value;
+    protected virtual TimeSpan CacheTtl => TimeSpan.FromHours(cacheOptions.Value.DefaultTtlHours);
+    protected void RemoveCachedText(string resourceKey) =>
+        responseCache.Remove(ProviderKey, $"text:{resourceKey}");
 
-    private readonly SemaphoreSlim requestGate = new(1, 1);
-    private readonly ConcurrentDictionary<string, CacheEntry> cache = new();
+    private readonly IProviderResponseCache responseCache = sharedCache ?? new ProviderResponseCache();
+    private string ProviderKey => $"{GetType().FullName}:{httpClient.BaseAddress}";
     private readonly TimeSpan minimumRequestInterval = TimeSpan.FromMilliseconds(250);
     private DateTimeOffset lastRequestAt = DateTimeOffset.MinValue;
 
@@ -25,19 +29,44 @@ public abstract class ProviderHttpClient(
         string resourceKey,
         CancellationToken cancellationToken)
     {
-        if (cache.TryGetValue(resourceKey, out var cached)
-            && cached.ExpiresAt > DateTimeOffset.UtcNow)
+        if (responseCache.TryGet(ProviderKey, resourceKey, out var cached))
         {
-            return new ProviderResponse<T>(
-                cached.Value.Deserialize<T>(),
-                ProviderAvailability.Available,
-                cached.ObservedAt,
-                cached.ExpiresAt);
+            try
+            {
+                return new ProviderResponse<T>(
+                    cached.Value.Deserialize<T>(),
+                    ProviderAvailability.Available,
+                    cached.ObservedAt,
+                    cached.ExpiresAt);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+            {
+                logger.LogWarning(exception, "Cached provider response was invalid for {ResourceKey}.", resourceKey);
+                return InvalidJsonResponse<T>(cached.ObservedAt);
+            }
         }
 
+        var requestGate = responseCache.GetRequestGate(ProviderKey);
         await requestGate.WaitAsync(cancellationToken);
         try
         {
+            if (responseCache.TryGet(ProviderKey, resourceKey, out cached))
+            {
+                try
+                {
+                    return new ProviderResponse<T>(
+                        cached.Value.Deserialize<T>(),
+                        ProviderAvailability.Available,
+                        cached.ObservedAt,
+                        cached.ExpiresAt);
+                }
+                catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+                {
+                    logger.LogWarning(exception, "Cached provider response was invalid for {ResourceKey}.", resourceKey);
+                    return InvalidJsonResponse<T>(cached.ObservedAt);
+                }
+            }
+
             var wait = minimumRequestInterval - (DateTimeOffset.UtcNow - lastRequestAt);
             if (wait > TimeSpan.Zero)
             {
@@ -68,14 +97,13 @@ public abstract class ProviderHttpClient(
                 return new ProviderResponse<T>(default, ProviderAvailability.Invalid, observedAt, null);
             }
 
-            var freshUntil = observedAt.AddHours(cacheOptions.Value.DefaultTtlHours);
+            var freshUntil = observedAt.Add(CacheTtl);
             var payload = JsonSerializer.SerializeToDocument(value);
-            cache[resourceKey] = new CacheEntry(payload, observedAt, freshUntil);
-            while (cache.Count > cacheOptions.Value.MaxEntriesPerProvider
-                   && cache.TryGetValue(cache.Keys.First(), out _))
-            {
-                cache.TryRemove(cache.Keys.First(), out _);
-            }
+            responseCache.Set(
+                ProviderKey,
+                resourceKey,
+                new ProviderResponseCacheEntry(payload, observedAt, freshUntil),
+                cacheOptions.Value.MaxEntriesPerProvider);
 
             return new ProviderResponse<T>(value, ProviderAvailability.Available, observedAt, freshUntil);
         }
@@ -95,6 +123,21 @@ public abstract class ProviderHttpClient(
                 DateTimeOffset.UtcNow,
                 null);
         }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            logger.LogWarning(exception, "Provider response contained invalid JSON for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<T>(DateTimeOffset.UtcNow);
+        }
+        catch (NotSupportedException exception)
+        {
+            logger.LogWarning(exception, "Provider response schema was unsupported for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<T>(DateTimeOffset.UtcNow);
+        }
+        catch (InvalidOperationException exception)
+        {
+            logger.LogWarning(exception, "Provider response schema was invalid for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<T>(DateTimeOffset.UtcNow);
+        }
         finally
         {
             requestGate.Release();
@@ -106,19 +149,44 @@ public abstract class ProviderHttpClient(
         CancellationToken cancellationToken)
     {
         var cacheKey = $"text:{resourceKey}";
-        if (cache.TryGetValue(cacheKey, out var cached)
-            && cached.ExpiresAt > DateTimeOffset.UtcNow)
+        if (responseCache.TryGet(ProviderKey, cacheKey, out var cached))
         {
-            return new ProviderResponse<string>(
-                cached.Value.Deserialize<string>(),
-                ProviderAvailability.Available,
-                cached.ObservedAt,
-                cached.ExpiresAt);
+            try
+            {
+                return new ProviderResponse<string>(
+                    cached.Value.Deserialize<string>(),
+                    ProviderAvailability.Available,
+                    cached.ObservedAt,
+                    cached.ExpiresAt);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+            {
+                logger.LogWarning(exception, "Cached provider response was invalid for {ResourceKey}.", resourceKey);
+                return InvalidJsonResponse<string>(cached.ObservedAt);
+            }
         }
 
+        var requestGate = responseCache.GetRequestGate(ProviderKey);
         await requestGate.WaitAsync(cancellationToken);
         try
         {
+            if (responseCache.TryGet(ProviderKey, cacheKey, out cached))
+            {
+                try
+                {
+                    return new ProviderResponse<string>(
+                        cached.Value.Deserialize<string>(),
+                        ProviderAvailability.Available,
+                        cached.ObservedAt,
+                        cached.ExpiresAt);
+                }
+                catch (JsonException exception)
+                {
+                    logger.LogWarning(exception, "Cached provider response was invalid for {ResourceKey}.", resourceKey);
+                    return InvalidJsonResponse<string>(cached.ObservedAt);
+                }
+            }
+
             var wait = minimumRequestInterval - (DateTimeOffset.UtcNow - lastRequestAt);
             if (wait > TimeSpan.Zero)
             {
@@ -147,14 +215,13 @@ public abstract class ProviderHttpClient(
             var availability = string.IsNullOrWhiteSpace(value)
                 ? ProviderAvailability.Empty
                 : ProviderAvailability.Available;
-            var freshUntil = observedAt.AddHours(cacheOptions.Value.DefaultTtlHours);
+            var freshUntil = observedAt.Add(CacheTtl);
             var payload = JsonSerializer.SerializeToDocument(value);
-            cache[cacheKey] = new CacheEntry(payload, observedAt, freshUntil);
-            while (cache.Count > cacheOptions.Value.MaxEntriesPerProvider
-                   && cache.TryGetValue(cache.Keys.First(), out _))
-            {
-                cache.TryRemove(cache.Keys.First(), out _);
-            }
+            responseCache.Set(
+                ProviderKey,
+                cacheKey,
+                new ProviderResponseCacheEntry(payload, observedAt, freshUntil),
+                cacheOptions.Value.MaxEntriesPerProvider);
 
             return new ProviderResponse<string>(value, availability, observedAt, freshUntil);
         }
@@ -173,6 +240,21 @@ public abstract class ProviderHttpClient(
                 ProviderAvailability.Unavailable,
                 DateTimeOffset.UtcNow,
                 null);
+        }
+        catch (JsonException exception)
+        {
+            logger.LogWarning(exception, "Provider response contained invalid JSON for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<string>(DateTimeOffset.UtcNow);
+        }
+        catch (NotSupportedException exception)
+        {
+            logger.LogWarning(exception, "Provider response schema was unsupported for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<string>(DateTimeOffset.UtcNow);
+        }
+        catch (InvalidOperationException exception)
+        {
+            logger.LogWarning(exception, "Provider response schema was invalid for {ResourceKey}.", resourceKey);
+            return InvalidJsonResponse<string>(DateTimeOffset.UtcNow);
         }
         finally
         {
@@ -207,14 +289,12 @@ public abstract class ProviderHttpClient(
             response.FreshUntil);
     }
 
-    private sealed record CacheEntry(
-        JsonDocument Value,
-        DateTimeOffset ObservedAt,
-        DateTimeOffset ExpiresAt);
-
     protected sealed record ProviderResponse<T>(
         T? Value,
         ProviderAvailability Availability,
         DateTimeOffset ObservedAt,
         DateTimeOffset? FreshUntil);
+
+    private static ProviderResponse<T> InvalidJsonResponse<T>(DateTimeOffset observedAt) =>
+        new(default, ProviderAvailability.Invalid, observedAt, null);
 }

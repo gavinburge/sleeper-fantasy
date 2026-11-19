@@ -170,6 +170,49 @@ explanation marked unavailable. If a required source fails, the job reports
 partial or failed status according to whether the affected result can be
 truthfully produced.
 
+### Recommendation quality evaluation
+
+Correct parsing and deterministic test cases do not by themselves establish
+that waiver recommendations are useful for real leagues. Keep recommendation
+quality evaluation separate from the build-gating test suite:
+
+- The build suite covers deterministic invariants, provider contracts,
+  identity normalization, freshness, failure handling, prompt bounds, and
+  structured LLM responses. It must remain offline, repeatable, and suitable
+  for pull requests.
+- A later evaluation suite uses sanitized, representative league snapshots
+  captured from real provider responses. It compares roster-risk and waiver
+  outputs against reviewed expectations, including position need, scoring
+  settings, stale or missing evidence, and recommendation ordering.
+- LLM evaluation should use recorded model responses or a controlled model
+  fixture for repeatability. It evaluates evidence grounding, citation
+  validity, caveat quality, and adherence to deterministic scores rather than
+  exact prose.
+- Evaluation results are reviewed before release and after material changes
+  to scoring weights, identity resolution, provider adapters, or prompts.
+  Failures should produce a report for review rather than make ordinary
+  compilation or unit-test execution depend on a live model or provider.
+
+  ### Scheduled provider smoke checks
+
+  Provider availability and upstream schema drift require a separate scheduled
+  check rather than a pull-request test dependency. A periodic job should call
+  each configured public source with bounded timeouts and verify:
+
+  - the expected endpoint responds successfully with the expected content type;
+  - required fields and representative record counts are present;
+  - provider timestamps and freshness metadata are parseable;
+  - representative Sleeper, nflverse, and injury records normalize without
+    unexpected identity or parser failures.
+
+  The check should record provider, endpoint, status, duration, observed source
+  timestamp, record count, parser warnings, and failure category without logging
+  raw payloads, credentials, or personal league data. It should alert on
+  availability failures, empty/unusually small responses, schema changes, and
+  stale source timestamps. These checks may use sanitized fixed requests or
+  public fixtures and must be isolated from ordinary build/test gates because
+  network availability, rate limits, and upstream data changes are expected.
+
 ### Evidence and LLM contract
 
 The LLM receives facts, not an instruction to browse arbitrarily. Each fact

@@ -18,9 +18,13 @@ Providers__LanguageModel=None
 Providers__GeminiApiKey=<server-only-key>
 Providers__GeminiModel=gemini-2.0-flash
 Providers__GeminiBaseUrl=https://generativelanguage.googleapis.com/v1beta
+Providers__GeminiResultTtlMinutes=30
 Providers__LanguageModelTimeoutSeconds=30
 Providers__LanguageModelMaxPromptCharacters=24000
 Cache__DefaultTtlHours=24
+Cache__SleeperTtlHours=24
+Cache__NflverseTtlHours=24
+Cache__InjuryReportTtlHours=24
 Cache__MaxEntriesPerProvider=100
 ```
 
@@ -30,12 +34,19 @@ and Identity settings are validated at startup.
 
 ## Freshness and failure behavior
 
-Successful provider responses are cached for `Cache__DefaultTtlHours`, subject
-to the per-provider entry limit. nflverse publishes rolling release assets
-under stable tags such as `schedules`, `stats_player`, and `weekly_rosters`;
-the GitHub release publication date is not the data freshness timestamp.
-Consumers should use each tag's `timestamp.json` asset when deciding whether
-the data is current. Sleeper requests are serialized and spaced to avoid burst
+Successful provider responses are cached for the configured source-specific TTL,
+subject to the per-provider entry limit. `Cache__DefaultTtlHours` remains the
+backward-compatible fallback when a source-specific TTL is omitted. nflverse
+publishes rolling release assets under stable tags such as
+`schedules`, `stats_player`, and `weekly_rosters`; the GitHub release
+publication date is not the data freshness timestamp. For a resource requested
+under a release tag, the adapter requests the matching tag metadata, for
+example:
+`https://github.com/nflverse/nflverse-data/releases/download/stats_player/timestamp.json`
+for `stats_player/stats_player_week_2026.csv` (and
+`weekly_rosters/timestamp.json` for the weekly roster asset). Consumers should
+use that release-specific `timestamp.json` when deciding whether the data is
+current. Sleeper requests are serialized and spaced to avoid burst
 traffic. A provider result reports `Available`, `Empty`,
 `RateLimited`, `Unavailable`, or `Invalid`; callers must preserve that state
 and must not turn an unavailable signal into a fact.

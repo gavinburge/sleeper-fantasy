@@ -115,7 +115,7 @@ public sealed class GeminiLanguageModelProvider(
                     return ProviderResult<LanguageModelResponse>.AvailableResult(
                         new LanguageModelResponse(settings.GeminiModel, parsed.Summary, findings,
                             parsed.Conflicts!, DateTimeOffset.UtcNow),
-                        Name, observedAt, observedAt.AddMinutes(30));
+                        Name, observedAt, observedAt.AddMinutes(settings.GeminiResultTtlMinutes));
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

@@ -49,7 +49,19 @@ public sealed class AnalysisEngineEndToEndTests
             geminiClient,
             providerOptions,
             NullLogger<GeminiLanguageModelProvider>.Instance);
-        var fixture = new AnalysisFixture();
+        var fixture = new AnalysisFixture
+        {
+            ExternalRoster =
+            [
+                new ExternalPlayerRecord("00-ROSTERED", "Rostered Player", "ABC", "RB", "00-ROSTERED", DateTimeOffset.UtcNow),
+                new ExternalPlayerRecord("00-FREE", "Free Player", "ABC", "WR", "00-FREE", DateTimeOffset.UtcNow)
+            ],
+            ExternalIds = new Dictionary<string, string>
+            {
+                ["rostered"] = "00-ROSTERED",
+                ["free"] = "00-FREE"
+            }
+        };
         var orchestrator = new AnalysisOrchestrator(
             new SourceRefreshService(leagueProvider, performanceProvider, injuryProvider),
             new RosterRiskAnalyzer(),
@@ -201,6 +213,11 @@ public sealed class AnalysisEngineEndToEndTests
 
         private static HttpResponseMessage Nflverse(string path)
         {
+            if (path.EndsWith("/timestamp.json", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonResponse(new { last_updated = "2026-11-19 00:00:00 UTC" });
+            }
+
             var csv = path switch
             {
                 "schedules/games.csv" =>

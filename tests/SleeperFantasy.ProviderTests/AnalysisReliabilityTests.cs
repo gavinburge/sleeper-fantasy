@@ -150,6 +150,7 @@ public sealed class AnalysisReliabilityTests
             {
                 GeminiApiKey = "key",
                 GeminiModel = "test-model",
+                GeminiResultTtlMinutes = 7,
                 LanguageModelTimeoutSeconds = 5,
                 LanguageModelMaxRetries = 1,
                 LanguageModelRetryDelayMilliseconds = 0
@@ -164,6 +165,7 @@ public sealed class AnalysisReliabilityTests
         Assert.Equal(2, handler.RequestCount);
         Assert.Empty(result.Value!.Findings);
         Assert.Empty(result.Value.Conflicts);
+        Assert.Equal(TimeSpan.FromMinutes(7), result.FreshUntil - result.ObservedAt);
     }
 
     [Theory]
@@ -404,7 +406,9 @@ public sealed class AnalysisReliabilityTests
             CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(body, Encoding.UTF8, mediaType)
+                Content = request.RequestUri?.AbsolutePath.EndsWith("timestamp.json", StringComparison.OrdinalIgnoreCase) == true
+                    ? new StringContent("""{"last_updated":"2026-11-19 00:00:00 UTC"}""", Encoding.UTF8, "application/json")
+                    : new StringContent(body, Encoding.UTF8, mediaType)
             });
     }
 

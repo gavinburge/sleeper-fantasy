@@ -10,7 +10,19 @@ public sealed class SourceRefreshServiceTests
     [Fact]
     public async Task Builds_snapshot_evidence_and_partial_failure_metadata()
     {
-        var fixture = new AnalysisFixture();
+        var fixture = new AnalysisFixture
+        {
+            ExternalRoster =
+            [
+                new ExternalPlayerRecord("gsis-rostered", "Rostered Player", "ABC", "RB", "gsis-rostered", DateTimeOffset.UtcNow),
+                new ExternalPlayerRecord("gsis-free", "Free Player", "ABC", "WR", "gsis-free", DateTimeOffset.UtcNow)
+            ],
+            ExternalIds = new Dictionary<string, string>
+            {
+                ["rostered"] = "gsis-rostered",
+                ["free"] = "gsis-free"
+            }
+        };
         var result = await fixture.CreateRefreshService(failInjuries: true)
             .RefreshAsync(fixture.Configuration, CancellationToken.None);
 
@@ -56,6 +68,28 @@ public sealed class SourceRefreshServiceTests
         Assert.Contains(result.Performance, x => x.PlayerId == "rostered");
         Assert.Contains(result.Usage, x => x.ProviderPlayerId == "free");
         Assert.DoesNotContain(result.Performance, x => x.PlayerId.StartsWith("gsis-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Empty_external_roster_does_not_fallback_to_sleeper_ids()
+    {
+        var fixture = new AnalysisFixture
+        {
+            ExternalRoster = [],
+            ExternalIds = new Dictionary<string, string>
+            {
+                ["rostered"] = "provider-rostered",
+                ["free"] = "provider-free"
+            }
+        };
+
+        var result = await fixture.CreateRefreshService().RefreshAsync(fixture.Configuration, CancellationToken.None);
+
+        Assert.Empty(result.Performance);
+        Assert.Empty(result.Usage);
+        Assert.Contains(result.Evidence, x =>
+            x.EvidenceType == "identity-unavailable"
+            && x.SubjectKey == "rostered");
     }
 
     [Fact]

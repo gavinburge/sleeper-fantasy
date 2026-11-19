@@ -11,11 +11,13 @@ namespace SleeperFantasy.Infrastructure.Providers;
 public sealed class NflInjuryReportProvider(
     HttpClient httpClient,
     IOptions<CacheOptions> cacheOptions,
-    ILogger<NflInjuryReportProvider> logger)
-    : ProviderHttpClient(httpClient, cacheOptions, logger), IInjuryDataProvider
+    ILogger<NflInjuryReportProvider> logger,
+    IProviderResponseCache? sharedCache = null)
+    : ProviderHttpClient(httpClient, cacheOptions, logger, sharedCache), IInjuryDataProvider
 {
     public const string Name = "nfl.com-injury-report";
     public string ProviderName => Name;
+    protected override TimeSpan CacheTtl => TimeSpan.FromHours(CacheSettings.EffectiveInjuryReportTtlHours);
 
     public async Task<ProviderResult<IReadOnlyList<InjuryReportRecord>>> GetCurrentReportsAsync(
         CancellationToken cancellationToken)

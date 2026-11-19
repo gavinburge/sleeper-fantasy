@@ -188,24 +188,37 @@ public sealed class SourceRefreshService(
         var ambiguous = 0;
         foreach (var player in players.Values)
         {
-            if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(player.PlayerId))
+            if (candidates.Count == 0
+                && rosterResult.Availability == ProviderAvailability.Unavailable)
             {
                 map[player.PlayerId] = player.PlayerId;
-                if (!rosterResult.IsSuccessful)
-                {
-                    evidence.Add(new EvidenceItem(
-                        $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
-                        performanceProvider.ProviderName,
-                        "identity-unavailable",
-                        player.PlayerId,
-                        $"External identity roster was unavailable; only the already-compatible ID {player.PlayerId} was preserved.",
-                        rosterResult.ObservedAt,
-                        null,
-                        null,
-                        player.PlayerId,
-                        rosterResult.Availability));
-                }
+                evidence.Add(new EvidenceItem(
+                    $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
+                    performanceProvider.ProviderName,
+                    "identity-unavailable",
+                    player.PlayerId,
+                    $"External identity roster was unavailable; the existing compatible provider ID {player.PlayerId} was preserved.",
+                    rosterResult.ObservedAt,
+                    rosterResult.FreshUntil,
+                    null,
+                    player.PlayerId,
+                    rosterResult.Availability));
+                continue;
+            }
 
+            if (candidates.Count == 0)
+            {
+                evidence.Add(new EvidenceItem(
+                    $"{performanceProvider.ProviderName}:identity:{player.PlayerId}",
+                    performanceProvider.ProviderName,
+                    "identity-unavailable",
+                    player.PlayerId,
+                    $"External identity roster was {rosterResult.Availability.ToString().ToLowerInvariant()}; no compatible external identity was established.",
+                    rosterResult.ObservedAt,
+                    rosterResult.FreshUntil,
+                    null,
+                    null,
+                    rosterResult.Availability));
                 continue;
             }
 

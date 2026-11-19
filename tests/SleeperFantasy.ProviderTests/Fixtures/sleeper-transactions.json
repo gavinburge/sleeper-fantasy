@@ -1,0 +1,15 @@
+[
+  {
+    "transaction_id": "txn-1",
+    "type": "waiver",
+    "status": "complete",
+    "created": 1763500000000,
+    "adds": {
+      "player-add-1": "roster-1",
+      "player-add-2": "roster-2"
+    },
+    "drops": {
+      "player-drop-1": "roster-1"
+    }
+  }
+]

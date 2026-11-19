@@ -9,11 +9,13 @@ namespace SleeperFantasy.Infrastructure.Providers;
 public sealed class SleeperDataProvider(
     HttpClient httpClient,
     IOptions<CacheOptions> cacheOptions,
-    ILogger<SleeperDataProvider> logger)
-    : ProviderHttpClient(httpClient, cacheOptions, logger), ILeagueDataProvider
+    ILogger<SleeperDataProvider> logger,
+    IProviderResponseCache? sharedCache = null)
+    : ProviderHttpClient(httpClient, cacheOptions, logger, sharedCache), ILeagueDataProvider
 {
     public const string Name = "Sleeper";
     public string ProviderName => Name;
+    protected override TimeSpan CacheTtl => TimeSpan.FromHours(CacheSettings.EffectiveSleeperTtlHours);
 
     public async Task<ProviderResult<SleeperUser>> GetUserAsync(
         string username,
@@ -357,16 +359,24 @@ public sealed class SleeperDataProvider(
 
     private static IReadOnlyList<string> ReadStringMap(JsonElement value, string property)
     {
-        if (!value.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        if (!value.TryGetProperty(property, out var items))
         {
             return [];
         }
 
-        return array.EnumerateArray()
-            .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Cast<string>()
-            .ToArray();
+        return items.ValueKind switch
+        {
+            JsonValueKind.Array => items.EnumerateArray()
+                .Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() : null)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Cast<string>()
+                .ToArray(),
+            JsonValueKind.Object => items.EnumerateObject()
+                .Select(x => x.Name)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToArray(),
+            _ => []
+        };
     }
 
     private static int? ReadInt(JsonElement value, string property) =>
@@ -382,8 +392,12 @@ public sealed class SleeperDataProvider(
             availability,
             Name,
             observedAt,
-            availability.ToString().ToUpperInvariant(),
-            $"The {Name} provider returned {availability.ToString().ToLowerInvariant()} data.");
+            availability == ProviderAvailability.Invalid
+                ? "INVALID_JSON"
+                : availability.ToString().ToUpperInvariant(),
+            availability == ProviderAvailability.Invalid
+                ? "The Sleeper provider returned malformed or schema-invalid JSON."
+                : $"The {Name} provider returned {availability.ToString().ToLowerInvariant()} data.");
 
     private Task<ProviderResponse<T>> GetSleeperJsonAsync<T>(
         string resourceKey,
