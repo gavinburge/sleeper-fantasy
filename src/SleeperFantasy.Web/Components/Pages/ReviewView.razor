@@ -1,0 +1,157 @@
+@using SleeperFantasy.Web
+
+<section class="review-grid">
+    <article class="setup-card">
+        <div class="section-heading">
+            <div>
+                <h2>Roster risks</h2>
+                <p class="muted">Week @Review.Deterministic.RosterRisk.CurrentWeek (@Review.Deterministic.RosterRisk.LeagueState)</p>
+            </div>
+            <span class="confidence-label">Review confidence: @Review.Confidence.ToString("P0")</span>
+        </div>
+
+        @if (Review.Deterministic.RosterRisk.Warnings.Count > 0)
+        {
+            <ul class="warning-list">
+                @foreach (var warning in Review.Deterministic.RosterRisk.Warnings)
+                {
+                    <li>@warning</li>
+                }
+            </ul>
+        }
+
+        @foreach (var player in Review.Deterministic.RosterRisk.Players.Where(x => x.IsStarter || x.RiskCodes.Count > 0))
+        {
+            <div class="player-row">
+                <div>
+                    <strong>@player.PlayerName</strong>
+                    <span class="muted">@player.Position · @(player.IsStarter ? "Starter" : "Bench")</span>
+                </div>
+                <div class="signal-group">
+                    @if (player.RiskCodes.Count > 0)
+                    {
+                        <span class="risk-label">@string.Join(", ", player.RiskCodes)</span>
+                    }
+                    @if (player.UnavailableSignals.Count > 0)
+                    {
+                        <span class="unavailable-label">Unavailable: @string.Join(", ", player.UnavailableSignals)</span>
+                    }
+                    @if (player.RecentPerformance is not null)
+                    {
+                        <span class="muted">Recent fantasy points: @player.RecentPerformance</span>
+                    }
+                </div>
+            </div>
+        }
+    </article>
+
+    <article class="setup-card">
+        <div class="section-heading">
+            <div>
+                <h2>Waiver recommendations</h2>
+                <p class="muted">Showing the top @Math.Min(20, Review.Deterministic.Waivers.Recommendations.Count) positive-scoring candidates.</p>
+            </div>
+            @if (!Review.Deterministic.Waivers.IsComplete)
+            {
+                <span class="risk-label">Incomplete snapshot</span>
+            }
+        </div>
+
+        @if (Review.Deterministic.Waivers.Warnings.Count > 0)
+        {
+            <ul class="warning-list">
+                @foreach (var warning in Review.Deterministic.Waivers.Warnings)
+                {
+                    <li>@warning</li>
+                }
+            </ul>
+        }
+
+        @if (Review.Deterministic.Waivers.Recommendations.Count == 0)
+        {
+            <p class="muted">No positive-scoring waiver candidates were found.</p>
+        }
+        else
+        {
+            @foreach (var recommendation in Review.Deterministic.Waivers.Recommendations.Take(20))
+            {
+                <div class="recommendation-card">
+                    <div class="recommendation-heading">
+                        <strong>#@recommendation.Priority @recommendation.PlayerName</strong>
+                        <span>@recommendation.Position · Score @recommendation.Score · Confidence @recommendation.Confidence.ToString("P0")</span>
+                    </div>
+                    <ul>
+                        @foreach (var reason in recommendation.Reasons)
+                        {
+                            <li>@reason</li>
+                        }
+                    </ul>
+                    @if (recommendation.Conflicts.Count > 0)
+                    {
+                        <p class="inline-error">Conflict: @string.Join("; ", recommendation.Conflicts)</p>
+                    }
+                    @if (recommendation.EvidenceIds.Count > 0)
+                    {
+                        <details>
+                            <summary>Evidence</summary>
+                            <ul class="evidence-list">
+                                @foreach (var evidenceId in recommendation.EvidenceIds)
+                                {
+                                    var evidence = FindEvidence(evidenceId);
+                                    if (evidence is not null)
+                                    {
+                                        <li>
+                                            <strong>@evidence.Provider</strong> · @evidence.EvidenceType
+                                            · observed @evidence.ObservedAt.ToLocalTime().ToString("g")
+                                        </li>
+                                    }
+                                    else
+                                    {
+                                        <li>@evidenceId</li>
+                                    }
+                                }
+                            </ul>
+                        </details>
+                    }
+                </div>
+            }
+        }
+    </article>
+</section>
+
+@if (Review.IsStale || Review.Caveats.Count > 0 || !Review.ContextualAnalysisAvailable)
+{
+    <section class="setup-card" aria-labelledby="limitations-heading">
+        <h2 id="limitations-heading">Limitations</h2>
+        @if (Review.IsStale)
+        {
+            <p class="risk-label">This review is stale and should be refreshed before making decisions.</p>
+        }
+        @if (Review.Caveats.Count > 0)
+        {
+            <ul class="warning-list">
+                @foreach (var caveat in Review.Caveats)
+                {
+                    <li>@caveat</li>
+                }
+            </ul>
+        }
+        @if (Review.ContextualAnalysis is not null)
+        {
+            <h3>Contextual explanation (@Review.ContextualAnalysis.Model)</h3>
+            <p>@Review.ContextualAnalysis.Summary</p>
+        }
+        else if (!Review.ContextualAnalysisAvailable)
+        {
+            <p class="muted">Contextual analysis is unavailable; deterministic findings remain authoritative.</p>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public AnalysisReviewViewModel Review { get; set; } = null!;
+
+    private EvidenceItemViewModel? FindEvidence(string evidenceId) =>
+        Review.Deterministic.Evidence.FirstOrDefault(x => x.EvidenceId == evidenceId);
+}

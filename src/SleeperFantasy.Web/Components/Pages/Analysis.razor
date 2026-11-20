@@ -1,0 +1,383 @@
+@page "/analysis"
+@rendermode InteractiveServer
+@using System.Text.Json
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+<PageTitle>Weekly analysis</PageTitle>
+
+<div class="analysis-shell">
+    <header class="page-header">
+        <p class="eyebrow">Sleeper Fantasy Advisor</p>
+        <h1>Weekly analysis</h1>
+        <p class="lede">Review roster risks and evidence-backed waiver candidates for your saved league.</p>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="status-message" role="status">Checking your sign-in session...</p>
+    }
+    else if (!_authenticated)
+    {
+        <section class="setup-card" aria-labelledby="sign-in-heading">
+            <h2 id="sign-in-heading">Sign in to view analysis</h2>
+            <p class="muted">Sign in from setup before viewing or starting an analysis.</p>
+            <a class="button-link" href="/setup">Open setup</a>
+        </section>
+    }
+    else
+    {
+        <section class="analysis-toolbar" aria-label="Analysis controls">
+            <div>
+                <strong>Status:</strong>
+                <span class="status-pill @StatusClass">@(_latest?.Run.Status ?? "not-started")</span>
+                @if (_latest?.Run.Stage is not null)
+                {
+                    <span class="muted">Stage: @_latest.Run.Stage</span>
+                }
+            </div>
+            <div class="toolbar-actions">
+                <button type="button" @onclick="StartAsync" disabled="@(_busy || IsActive)">
+                    @(_busy ? "Starting..." : "Run analysis")
+                </button>
+                @if (_latest?.Run.RetryAvailable == true)
+                {
+                    <button type="button" class="secondary-button" @onclick="RetryAsync" disabled="@_busy">
+                        Retry
+                    </button>
+                }
+                <button type="button" class="secondary-button" @onclick="RefreshAsync" disabled="@_busy">
+                    Refresh
+                </button>
+            </div>
+        </section>
+
+        @if (_latest is null)
+        {
+            <section class="setup-card">
+                <h2>No analysis has been run</h2>
+                <p class="muted">Start an analysis to refresh your roster risks and waiver recommendations.</p>
+            </section>
+        }
+        else
+        {
+            <section class="metadata-card" aria-label="Analysis metadata">
+                <span>Created: @_latest.Run.CreatedAt.ToLocalTime().ToString("g")</span>
+                @if (_latest.Run.CompletedAt is not null)
+                {
+                    <span>Completed: @_latest.Run.CompletedAt.Value.ToLocalTime().ToString("g")</span>
+                }
+                <span>Attempt: @_latest.Run.Attempt</span>
+                @if (_latest.Result is not null)
+                {
+                    <span>Confidence: @_latest.Result.Confidence.ToString("P0")</span>
+                }
+            </section>
+
+            @if (_latest.Run.Status is "failed" or "retryable" or "stale")
+            {
+                <section class="error-banner" role="alert">
+                    <strong>Analysis did not complete.</strong>
+                    @if (!string.IsNullOrWhiteSpace(_latest.Run.ErrorMessage))
+                    {
+                        <span>@_latest.Run.ErrorMessage</span>
+                    }
+                    @if (_latest.Run.ErrorCode is not null)
+                    {
+                        <span>(@_latest.Run.ErrorCode)</span>
+                    }
+                </section>
+            }
+
+            @if (_latest.Result is null && IsActive)
+            {
+                <section class="setup-card" role="status">
+                    <h2>Analysis in progress</h2>
+                    <p class="muted">The page will update automatically while the Worker refreshes the source data.</p>
+                    @if (_latest.Run.LastHeartbeatAt is not null)
+                    {
+                        <p class="muted">Last heartbeat: @_latest.Run.LastHeartbeatAt.Value.ToLocalTime().ToString("g")</p>
+                    }
+                </section>
+            }
+
+            @if (_latest.Result is not null)
+            {
+                <ErrorBoundary>
+                    <ChildContent>
+                        <ReviewView Review="_latest.Result" />
+                    </ChildContent>
+                    <ErrorContent Context="exception">
+                        <section class="error-banner" role="alert">
+                            The analysis result could not be displayed. Refresh the page and try again.
+                        </section>
+                    </ErrorContent>
+                </ErrorBoundary>
+            }
+        }
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="error-banner" role="alert">@_error</p>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _authenticated;
+    private bool _busy;
+    private string? _error;
+    private AnalysisLatestViewModel? _latest;
+    private CancellationTokenSource _pollCancellation = new();
+    private Task? _pollTask;
+
+    private bool IsActive =>
+        _latest?.Run.Status is "queued" or "running";
+
+    private string StatusClass =>
+        _latest?.Run.Status switch
+        {
+            "completed" => "status-complete",
+            "failed" or "retryable" or "stale" => "status-error",
+            "queued" or "running" => "status-active",
+            _ => "status-neutral"
+        };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            await CheckSessionAsync();
+            if (_authenticated)
+            {
+                await RefreshLatestAsync(render: false);
+            }
+        }
+        catch (JsonException)
+        {
+            _error = "The API returned an analysis response the page could not read. Refresh the page and try again.";
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+            StartPollingIfNeeded();
+        }
+    }
+
+    private async Task CheckSessionAsync()
+    {
+        try
+        {
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                "/api/auth/session",
+                "GET",
+                null,
+                null);
+            _authenticated = response.Status is >= 200 and < 300
+                && JsonSerializer.Deserialize<SessionResponse>(
+                    response.Body,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Authenticated == true;
+        }
+        catch (JSException)
+        {
+            _error = "The API could not be reached. Confirm it is running, then reload this page.";
+        }
+        catch (JsonException)
+        {
+            _error = "The sign-in session response was invalid. Refresh the page and try again.";
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var token = await GetAntiforgeryTokenAsync();
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                "/api/v1/analysis/run",
+                "POST",
+                null,
+                token);
+            if (response.Status is >= 200 and < 300)
+            {
+                var run = AnalysisViewModelParser.ParseRun(response.Body);
+                if (run is not null)
+                {
+                    _latest = new AnalysisLatestViewModel(run, null);
+                    StartPollingIfNeeded();
+                }
+            }
+            else
+            {
+                _error = ErrorMessage(response, "The analysis could not be started.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        if (_latest?.Run.Id is not Guid runId)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var token = await GetAntiforgeryTokenAsync();
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                $"/api/v1/analysis/{runId}/retry",
+                "POST",
+                null,
+                token);
+            if (response.Status is >= 200 and < 300)
+            {
+                var run = AnalysisViewModelParser.ParseRun(response.Body);
+                if (run is not null)
+                {
+                    _latest = new AnalysisLatestViewModel(run, null);
+                    StartPollingIfNeeded();
+                }
+            }
+            else
+            {
+                _error = ErrorMessage(response, "The analysis retry could not be started.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _error = null;
+        await RefreshLatestAsync();
+        StartPollingIfNeeded();
+    }
+
+    private async Task RefreshLatestAsync(bool render = true)
+    {
+        try
+        {
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                "/api/v1/analysis/latest",
+                "GET",
+                null,
+                null);
+            if (response.Status is >= 200 and < 300)
+            {
+                _latest = AnalysisViewModelParser.ParseLatest(response.Body);
+            }
+            else if (response.Status == 404)
+            {
+                _latest = null;
+            }
+            else if (response.Status == 401)
+            {
+                _authenticated = false;
+            }
+            else
+            {
+                _error = ErrorMessage(response, "The latest analysis could not be loaded.");
+            }
+        }
+        catch (JSException)
+        {
+            _error = "The API could not be reached. Confirm it is running, then try again.";
+        }
+        catch (JsonException)
+        {
+            _error = "The latest analysis response was invalid. Refresh the page and try again.";
+        }
+
+        if (render)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void StartPollingIfNeeded()
+    {
+        if (IsActive && (_pollTask is null || _pollTask.IsCompleted))
+        {
+            _pollTask = PollAsync(_pollCancellation.Token);
+        }
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested && IsActive)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                await RefreshLatestAsync();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task<string?> GetAntiforgeryTokenAsync()
+    {
+        var response = await Js.InvokeAsync<BrowserResponse>(
+            "sleeperApi.request",
+            "/api/auth/antiforgery",
+            "GET",
+            null,
+            null);
+        return response.Status is >= 200 and < 300
+            ? JsonSerializer.Deserialize<AntiforgeryResponse>(
+                response.Body,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Token
+            : null;
+    }
+
+    private static string ErrorMessage(BrowserResponse response, string fallback)
+    {
+        try
+        {
+            var error = JsonSerializer.Deserialize<ApiError>(
+                response.Body,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return string.IsNullOrWhiteSpace(error?.Message) ? fallback : error.Message;
+        }
+        catch (JsonException)
+        {
+            return fallback;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _pollCancellation.CancelAsync();
+        _pollCancellation.Dispose();
+    }
+
+    private sealed record BrowserResponse(int Status, string Body);
+    private sealed record SessionResponse(bool Authenticated);
+    private sealed record AntiforgeryResponse(string Token);
+    private sealed record ApiError(string? Message);
+}

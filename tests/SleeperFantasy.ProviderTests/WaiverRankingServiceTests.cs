@@ -85,4 +85,46 @@ public sealed class WaiverRankingServiceTests
         Assert.Equal("positive", recommendation.PlayerId);
         Assert.Equal(1, recommendation.Priority);
     }
+
+    [Fact]
+    public void Limits_shortlist_to_ten_recommendations_per_position()
+    {
+        var fixture = new AnalysisFixture();
+        var players = Enumerable.Range(1, 11)
+            .Select(index => new AvailablePlayer(
+                $"rb-{index}",
+                $"Running Back {index}",
+                "RB",
+                "ABC",
+                DateTimeOffset.UtcNow,
+                ["RB"],
+                true))
+            .ToArray();
+        var availability = new AvailabilityPool(players, DateTimeOffset.UtcNow, true, []);
+        var performance = players
+            .Select((player, index) => new PlayerPerformanceRecord(
+                player.PlayerId,
+                "ABC",
+                "RB",
+                "2026",
+                4,
+                new Dictionary<string, decimal> { ["fantasy_points"] = 10m - index },
+                DateTimeOffset.UtcNow))
+            .ToArray();
+
+        var result = new WaiverRankingService().Rank(
+            fixture.Snapshot,
+            fixture.RosterRisk,
+            availability,
+            performance,
+            [],
+            [],
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(10, result.Recommendations.Count);
+        Assert.Equal(
+            Enumerable.Range(1, 10).Select(index => $"rb-{index}"),
+            result.Recommendations.Select(x => x.PlayerId));
+        Assert.Equal(Enumerable.Range(1, 10), result.Recommendations.Select(x => x.Priority));
+    }
 }

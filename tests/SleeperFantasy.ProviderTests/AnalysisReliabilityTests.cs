@@ -168,6 +168,64 @@ public sealed class AnalysisReliabilityTests
         Assert.Equal(TimeSpan.FromMinutes(7), result.FreshUntil - result.ObservedAt);
     }
 
+    [Fact]
+    public async Task Gemini_skips_findings_with_invalid_shapes()
+    {
+        var modelJson = """
+            {
+              "summary": "ok",
+              "selectedPlayerIds": ["player-1"],
+              "findings": [
+                "invalid finding",
+                {
+                  "subjectKey": "player-1",
+                  "explanation": "Useful evidence-backed finding.",
+                  "confidence": 0.8,
+                  "evidenceIds": ["evidence-1"],
+                  "caveats": []
+                }
+              ],
+              "conflicts": []
+            }
+            """;
+        var handler = new GeminiHandler(
+            JsonResponse(
+                """{"candidates":[{"content":{"parts":[{"text":"""
+                + JsonSerializer.Serialize(modelJson)
+                + """}]}}]}"""));
+        using var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://gemini.test/v1beta/")
+        };
+        var provider = new GeminiLanguageModelProvider(
+            client,
+            Options.Create(new ProviderOptions
+            {
+                GeminiApiKey = "key",
+                GeminiModel = "test-model"
+            }),
+            NullLogger<GeminiLanguageModelProvider>.Instance);
+
+        var result = await provider.AnalyzeAsync(
+            new LanguageModelRequest(
+                "analysis",
+                "system",
+                "user",
+                [new LanguageModelEvidence(
+                    "evidence-1",
+                    "player-1",
+                    "fact",
+                    "fixture",
+                    DateTimeOffset.UtcNow,
+                    null,
+                    1m)]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccessful);
+        Assert.Single(result.Value!.Findings);
+        Assert.Equal("player-1", result.Value.Findings[0].SubjectKey);
+    }
+
     [Theory]
     [InlineData("""{"summary":"ok","conflicts":[]}""")]
     [InlineData("""{"summary":"ok","findings":[]}""")]

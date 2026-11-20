@@ -28,4 +28,5 @@ public sealed record LanguageModelResponse(
     string? Summary,
     IReadOnlyList<LanguageModelFinding> Findings,
     IReadOnlyList<string> Conflicts,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt,
+    IReadOnlyList<string>? SelectedPlayerIds = null);

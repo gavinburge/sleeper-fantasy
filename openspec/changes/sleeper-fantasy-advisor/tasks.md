@@ -45,9 +45,10 @@
 ## 6. Web client
 
 - [x] 6.1 Build the authenticated setup view for Sleeper username, season, league, and roster selection; verify validation and source errors are visible without exposing server credentials.
-- [ ] 6.2 Build the analysis view with manual start, polling/status display, stale indicators, retry behavior, and completed review presentation; verify queued/running/failed/completed states render correctly.
-- [ ] 6.3 Build roster-risk and waiver recommendation views showing rationale, evidence sources, timestamps, confidence, conflicts, and limitations; verify unavailable signals are not presented as facts.
-- [ ] 6.4 Add web-client tests for the primary setup and analysis flows; verify the UI consumes API contracts rather than calling provider endpoints directly.
+- [x] 6.2 Build the analysis view with manual start, polling/status display, stale indicators, retry behavior, and completed review presentation; verify queued/running/failed/completed states render correctly.
+- [x] 6.3 Build roster-risk and waiver recommendation views showing rationale, evidence sources, timestamps, confidence, conflicts, and limitations; verify unavailable signals are not presented as facts.
+- [x] 6.4 Add web-client tests for the primary setup and analysis flows; verify the UI consumes API contracts rather than calling provider endpoints directly.
+- [ ] 6.5 Secure web-client routes and hosting so unauthenticated users cannot access the setup or analysis dashboard; verify protected UI access and API operations require an authenticated application session.
 
 ## 7. Integration and operational verification
 

@@ -6,16 +6,30 @@ namespace SleeperFantasy.Application.Features.Analysis;
 
 public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider)
 {
+    private const int MaxEvidencePerCandidate = 10;
+    private const int MaxEvidenceCharacters = 4_096;
+    private const int MaxShortlistCandidates = 20;
+
     public async Task<AnalysisReview> MergeAsync(
         string analysisId,
         DeterministicAnalysis deterministic,
         CancellationToken cancellationToken)
     {
-        var evidence = deterministic.Evidence
+        var shortlist = deterministic.Waivers.Recommendations;
+        var shortlistIds = shortlist
+            .Select(x => x.PlayerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var shortlistEvidenceIds = shortlist
+            .SelectMany(x => x.EvidenceIds.Take(MaxEvidencePerCandidate))
+            .ToHashSet(StringComparer.Ordinal);
+        var evidence = (shortlistEvidenceIds.Count == 0
+                ? deterministic.Evidence
+                : deterministic.Evidence.Where(x => shortlistEvidenceIds.Contains(x.EvidenceId)))
+            .Take(100)
             .Select(x => new LanguageModelEvidence(
                 x.EvidenceId,
                 x.SubjectKey,
-                x.Fact,
+                CompactEvidence(x.Fact),
                 x.Provider,
                 x.ObservedAt,
                 x.FreshUntil,
@@ -31,11 +45,20 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
             }).Take(50),
             waivers = deterministic.Waivers.Recommendations.Select(x => new
             {
-                x.PlayerId, x.PlayerName, x.Score, x.Priority, x.Reasons, x.Conflicts, x.Confidence, x.IsStale
-            }).Take(50),
+                x.PlayerId, x.PlayerName, x.Position, x.Score, x.Priority, x.Reasons, x.Conflicts,
+                x.Confidence, x.IsStale, evidenceIds = x.EvidenceIds.Take(MaxEvidencePerCandidate)
+            }).Take(MaxShortlistCandidates),
             availablePlayers = deterministic.Availability.Players
-                .Select(x => new { x.PlayerId, x.Position, x.Eligibility, x.EvidenceComplete })
-                .Take(50),
+                .Where(x => shortlistIds.Contains(x.PlayerId))
+                .Select(x => new { x.PlayerId, x.FullName, x.Position, x.Team, x.Eligibility, x.EvidenceComplete }),
+            rosterNeeds = deterministic.RosterRisk.Players
+                .Where(x => x.IsStarter && x.RiskCodes.Count > 0)
+                .GroupBy(x => x.Position ?? "UNKNOWN", StringComparer.OrdinalIgnoreCase)
+                .Select(x => new { position = x.Key, priority = x.Count() }),
+            currentRoster = deterministic.RosterRisk.Players.Select(x => new
+            {
+                x.PlayerId, x.PlayerName, x.Position, x.IsStarter, x.RiskCodes, x.UnavailableSignals
+            }),
             warnings = deterministic.RosterRisk.Warnings
                 .Concat(deterministic.Waivers.Warnings)
                 .Concat(deterministic.Availability.Warnings)
@@ -45,8 +68,8 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
 
         var request = new LanguageModelRequest(
             analysisId,
-            "Explain only the supplied evidence and deterministic summary. Deterministic facts, scores, priorities, conflicts, and unavailable signals are authoritative. Do not change, override, or invent them.",
-            "Summarize the deterministic results, citing evidence IDs where useful. You may explain the results and caveats only; you must not replace deterministic facts or rankings.",
+            "Use only the supplied evidence and deterministic summary. Deterministic facts, scores, conflicts, and unavailable signals are authoritative. Do not invent players, evidence, scores, teams, or roster needs.",
+            "Choose up to three player IDs per position from the supplied top-ten shortlist, prioritizing the roster's greatest needs while considering player score, team, and evidence. Return those IDs in selectedPlayerIds. Summarize the recommendations and cite evidence IDs where useful.",
             evidence,
             deterministicSummary);
 
@@ -86,10 +109,56 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
             .Where(finding => finding.EvidenceIds.Count > 0)
             .ToArray();
         
-        var response = result.Value with { Findings = validFindings };
+        var validCandidateIds = shortlistIds;
+        var selectedIds = (result.Value.SelectedPlayerIds ?? [])
+            .Where(validCandidateIds.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+        var selectedRecommendations = shortlist
+            .Where(x => selectedIds.Contains(x.PlayerId))
+            .GroupBy(x => x.Position ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(x => x.Take(3))
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.PlayerName, StringComparer.Ordinal)
+            .Select((x, index) => x with { Priority = index + 1 })
+            .ToArray();
+        if (selectedRecommendations.Length == 0)
+        {
+            selectedRecommendations = shortlist
+                .GroupBy(x => x.Position ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(x => x.Take(3))
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.PlayerName, StringComparer.Ordinal)
+                .Select((x, index) => x with { Priority = index + 1 })
+                .ToArray();
+        }
+
+        var selectedRecommendationIds = selectedRecommendations
+            .Select(x => x.PlayerId)
+            .ToHashSet(StringComparer.Ordinal);
+        var selectedDeterministic = shortlist.Count == 0
+            ? deterministic
+            : deterministic with
+            {
+                Availability = deterministic.Availability with
+                {
+                    Players = deterministic.Availability.Players
+                        .Where(x => selectedRecommendationIds.Contains(x.PlayerId))
+                        .ToArray()
+                },
+                Waivers = deterministic.Waivers with
+                {
+                    Recommendations = selectedRecommendations
+                }
+            };
+        var response = result.Value with
+        {
+            Findings = validFindings,
+            SelectedPlayerIds = selectedRecommendations.Select(x => x.PlayerId).ToArray()
+        };
         
         return new AnalysisReview(
-            deterministic,
+            selectedDeterministic,
             response,
             true,
             caveats,
@@ -97,6 +166,11 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
             stale,
             DateTimeOffset.UtcNow);
     }
+
+    private static string CompactEvidence(string fact) =>
+        fact.Length <= MaxEvidenceCharacters
+            ? fact
+            : $"{fact[..MaxEvidenceCharacters]} [truncated]";
 
     private static bool IsStale(DeterministicAnalysis deterministic) =>
         deterministic.Failures.Count > 0

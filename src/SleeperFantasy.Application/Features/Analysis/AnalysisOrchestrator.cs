@@ -50,7 +50,7 @@ public sealed class AnalysisOrchestrator(
             refreshed.Injuries,
             refreshed.RefreshedAt,
             refreshed.Evidence);
-        
+
         var deterministic = new DeterministicAnalysis(
             rosterRisk,
             availability,
@@ -59,9 +59,11 @@ public sealed class AnalysisOrchestrator(
             refreshed.Failures,
             refreshed.RefreshedAt);
         
-        return await languageModelAnalysisService.MergeAsync(
+        var review = await languageModelAnalysisService.MergeAsync(
             Guid.NewGuid().ToString("N"),
             deterministic,
             cancellationToken);
+
+        return AnalysisReviewLimiter.Limit(review);
     }
 }

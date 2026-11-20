@@ -14,6 +14,11 @@ public sealed class GeminiLanguageModelProvider(
     ILogger<GeminiLanguageModelProvider> logger)
     : ILanguageModelProvider
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly ProviderOptions settings = options.Value;
 
     public const string Name = "Gemini";
@@ -95,7 +100,7 @@ public sealed class GeminiLanguageModelProvider(
                     try
                     {
                         parsed = JsonSerializer.Deserialize<LanguageModelResponseDto>(
-                            text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            text, JsonOptions);
                     }
                     catch (JsonException exception)
                     {
@@ -112,23 +117,11 @@ public sealed class GeminiLanguageModelProvider(
                     }
 
                     var knownEvidence = request.Evidence.Select(x => x.EvidenceId).ToHashSet(StringComparer.Ordinal);
-                    var findings = parsed.Findings!
-                        .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.SubjectKey) && !string.IsNullOrWhiteSpace(x.Explanation))
-                        .Select(x => new
-                        {
-                            Finding = new LanguageModelFinding(
-                            x!.SubjectKey!, x.Explanation!, Math.Clamp(x.Confidence ?? 0m, 0m, 1m),
-                            (x.EvidenceIds ?? []).Where(knownEvidence.Contains).Distinct(StringComparer.Ordinal).ToArray(),
-                            x.Caveats ?? []),
-                            EvidenceCount = (x.EvidenceIds ?? []).Count(knownEvidence.Contains)
-                        })
-                        .Where(x => x.EvidenceCount > 0)
-                        .Select(x => x.Finding)
-                        .ToArray();
+                    var findings = ParseFindings(parsed.Findings, knownEvidence);
 
                     return ProviderResult<LanguageModelResponse>.AvailableResult(
                         new LanguageModelResponse(settings.GeminiModel, parsed.Summary, findings,
-                            parsed.Conflicts!, DateTimeOffset.UtcNow),
+                            parsed.Conflicts!, DateTimeOffset.UtcNow, parsed.SelectedPlayerIds ?? []),
                         Name, observedAt, observedAt.AddMinutes(settings.GeminiResultTtlMinutes));
             }
         }
@@ -227,6 +220,59 @@ public sealed class GeminiLanguageModelProvider(
     private static string ToPascalCase(string value) =>
         char.ToUpperInvariant(value[0]) + value[1..];
 
+    private LanguageModelFinding[] ParseFindings(
+        IEnumerable<JsonElement> rawFindings,
+        IReadOnlySet<string> knownEvidence)
+    {
+        var findings = new List<LanguageModelFinding>();
+        foreach (var rawFinding in rawFindings)
+        {
+            if (rawFinding.ValueKind != JsonValueKind.Object)
+            {
+                logger.LogWarning(
+                    "Gemini returned a finding with JSON kind {JsonKind}; skipping it.",
+                    rawFinding.ValueKind);
+                continue;
+            }
+
+            FindingDto? finding;
+            try
+            {
+                finding = rawFinding.Deserialize<FindingDto>(JsonOptions);
+            }
+            catch (JsonException exception)
+            {
+                logger.LogWarning(exception, "Gemini returned a finding with an invalid shape; skipping it.");
+                continue;
+            }
+
+            if (finding is null
+                || string.IsNullOrWhiteSpace(finding.SubjectKey)
+                || string.IsNullOrWhiteSpace(finding.Explanation))
+            {
+                continue;
+            }
+
+            var evidenceIds = (finding.EvidenceIds ?? [])
+                .Where(knownEvidence.Contains)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (evidenceIds.Length == 0)
+            {
+                continue;
+            }
+
+            findings.Add(new LanguageModelFinding(
+                finding.SubjectKey,
+                finding.Explanation,
+                Math.Clamp(finding.Confidence ?? 0m, 0m, 1m),
+                evidenceIds,
+                finding.Caveats ?? []));
+        }
+
+        return findings.ToArray();
+    }
+
     private static string BuildPrompt(LanguageModelRequest request, int maxCharacters)
     {
         var limit = Math.Max(1, maxCharacters);
@@ -234,7 +280,7 @@ public sealed class GeminiLanguageModelProvider(
             x.EvidenceId, x.SubjectKey, x.Fact, x.Source, x.ObservedAt, x.FreshUntil, x.Confidence)).ToList();
         var deterministic = ParseStructuredSummary(request.DeterministicSummary);
         const string deterministicContract = "Deterministic summary (authoritative; do not override): Deterministic facts, scores, priorities, conflicts, and unavailable signals are authoritative. Do not change, override, or invent them.";
-        const string responseContract = "Return only a JSON object with summary, findings, and conflicts. Findings must cite supplied evidence IDs.";
+        const string responseContract = "Return only a JSON object with summary, selectedPlayerIds, findings, and conflicts. selectedPlayerIds must contain only supplied shortlist player IDs. Findings must cite supplied evidence IDs.";
 
         string Compose(bool includeUser) =>
             $"{request.SystemInstruction}\n\n{deterministicContract}\n{responseContract}\n\nDeterministic data:\n{deterministic}\n\nEvidence:\n{JsonSerializer.Serialize(evidence)}"
@@ -303,7 +349,8 @@ public sealed class GeminiLanguageModelProvider(
     private sealed class LanguageModelResponseDto
     {
         public string? Summary { get; set; }
-        public List<FindingDto> Findings { get; set; } = [];
+        public List<string>? SelectedPlayerIds { get; set; }
+        public List<JsonElement> Findings { get; set; } = [];
         public List<string> Conflicts { get; set; } = [];
     }
 

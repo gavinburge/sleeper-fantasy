@@ -241,6 +241,11 @@ public sealed class AnalysisRunService(
             }
         }
 
+        if (result is not null)
+        {
+            result = AnalysisReviewLimiter.LimitForTransport(result);
+        }
+
         return new AnalysisLatestResponse(ToResponse(run), result);
     }
 

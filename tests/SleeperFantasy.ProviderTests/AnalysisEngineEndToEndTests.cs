@@ -104,11 +104,11 @@ public sealed class AnalysisEngineEndToEndTests
         var prompt = requestRoot.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString();
         if (allowFreshnessTimestamps)
         {
-            Assert.StartsWith("Explain only the supplied evidence and deterministic summary.", prompt);
+            Assert.StartsWith("Use only the supplied evidence and deterministic summary.", prompt);
         }
         else
         {
-            Assert.StartsWith("Explain only the supplied evidence and deterministic summary.", prompt);
+            Assert.StartsWith("Use only the supplied evidence and deterministic summary.", prompt);
         }
 
         Assert.Contains("Deterministic summary (authoritative; do not override):", prompt);
