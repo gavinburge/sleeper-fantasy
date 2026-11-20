@@ -34,7 +34,11 @@ public sealed class AnalysisRunExecutor(
 
         if (!await runService.ClaimAsync(run.Id, executionId, cancellationToken))
         {
-            logger.LogInformation("Analysis run was already claimed or completed. AnalysisId={AnalysisId}", run.Id);
+            logger.LogInformation(
+                "Analysis run was not claimable. AnalysisId={AnalysisId} Status={Status} LastHeartbeatAt={LastHeartbeatAt}",
+                run.Id,
+                run.Status,
+                run.LastHeartbeatAt);
             return;
         }
 

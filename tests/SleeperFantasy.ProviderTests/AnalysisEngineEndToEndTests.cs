@@ -78,6 +78,10 @@ public sealed class AnalysisEngineEndToEndTests
         Assert.Equal(82m, Assert.Single(first.Deterministic.Waivers.Recommendations).Score);
         Assert.Equal("free", first.Deterministic.Waivers.Recommendations[0].PlayerId);
         Assert.Contains("injury", first.Deterministic.RosterRisk.Players.Single(x => x.PlayerId == "rostered").RiskCodes);
+        var defense = first.Deterministic.RosterRisk.Players.Single(x => x.PlayerId == "DEN");
+        Assert.Equal("Denver Broncos", defense.PlayerName);
+        Assert.Equal("DEF", defense.Position);
+        Assert.DoesNotContain(first.Deterministic.RosterRisk.Warnings, x => x.Contains("DEN", StringComparison.Ordinal));
         Assert.Equal(
             first.Deterministic.Waivers.Recommendations.Select(x => (x.PlayerId, x.Score, x.Priority, x.Confidence)),
             second.Deterministic.Waivers.Recommendations.Select(x => (x.PlayerId, x.Score, x.Priority, x.Confidence)));
@@ -167,8 +171,8 @@ public sealed class AnalysisEngineEndToEndTests
                     {
                         roster_id = "roster-1",
                         owner_id = "sleeper-user",
-                        players = new[] { "rostered" },
-                        starters = new[] { "rostered" },
+                        players = new[] { "rostered", "DEN" },
+                        starters = new[] { "rostered", "DEN" },
                         settings = new { wins = 3, losses = 1, ties = 0, fpts = 100.5m },
                         metadata = new { team_name = "Home" }
                     },
@@ -203,6 +207,14 @@ public sealed class AnalysisEngineEndToEndTests
                         last_name = "Player",
                         position = "RB",
                         team = "ABC",
+                        active = true
+                    },
+                    DEN = new
+                    {
+                        first_name = "Denver",
+                        last_name = "Broncos",
+                        position = "DEF",
+                        team = "DEN",
                         active = true
                     }
                 },

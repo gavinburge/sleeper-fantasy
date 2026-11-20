@@ -76,6 +76,17 @@ public sealed class AnalysisRunService(
         string? executionId,
         CancellationToken cancellationToken)
     {
+        var managerConfigurationId = await dbContext.AnalysisRuns
+            .Where(x => x.Id == runId)
+            .Select(x => (Guid?)x.ManagerConfigurationId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (managerConfigurationId is null)
+        {
+            return false;
+        }
+
+        await RecoverAbandonedAsync(managerConfigurationId.Value, cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         
         var updated = await dbContext.AnalysisRuns

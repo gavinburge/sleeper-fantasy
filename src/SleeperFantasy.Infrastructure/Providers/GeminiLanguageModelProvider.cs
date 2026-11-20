@@ -65,8 +65,22 @@ public sealed class GeminiLanguageModelProvider(
                     if (!response.IsSuccessStatusCode)
                     {
                         logger.LogWarning("Gemini request failed with status {StatusCode}.", (int)response.StatusCode);
+                        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                        var errorCode = response.StatusCode switch
+                        {
+                            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "AUTHENTICATION_FAILED",
+                            HttpStatusCode.NotFound => "MODEL_NOT_FOUND",
+                            _ => "MODEL_UNAVAILABLE"
+                        };
+                        var detail = string.IsNullOrWhiteSpace(responseBody)
+                            ? string.Empty
+                            : $" Response: {responseBody[..Math.Min(responseBody.Length, 500)]}";
                         return ProviderResult<LanguageModelResponse>.Failure(
-                            ProviderAvailability.Unavailable, Name, observedAt, "MODEL_UNAVAILABLE", "Gemini did not return a successful response.");
+                            ProviderAvailability.Unavailable,
+                            Name,
+                            observedAt,
+                            errorCode,
+                            $"Gemini returned HTTP {(int)response.StatusCode} ({response.StatusCode}).{detail}");
                     }
 
                     using var document = await JsonDocument.ParseAsync(

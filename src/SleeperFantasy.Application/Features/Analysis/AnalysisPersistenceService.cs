@@ -19,6 +19,7 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
         run.Stage = "persisted";
         run.CompletedAt = now;
         run.LastHeartbeatAt = now;
+        NormalizeRunTimestamps(run);
         run.ErrorCode = null;
         run.ErrorMessage = null;
 
@@ -35,8 +36,8 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
                 PayloadJson = JsonSerializer.Serialize(evidence.Fact),
                 Availability = evidence.Availability.ToString(),
                 IsStale = evidence.IsStale(now),
-                ObservedAt = evidence.ObservedAt,
-                FreshUntil = evidence.FreshUntil
+                ObservedAt = evidence.ObservedAt.ToUniversalTime(),
+                FreshUntil = evidence.FreshUntil?.ToUniversalTime()
             });
         }
 
@@ -50,7 +51,7 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
             IsStale = review.IsStale,
             SourceManifestJson = JsonSerializer.Serialize(review.Deterministic.Evidence
                 .Select(x => new { x.EvidenceId, x.Provider, x.ObservedAt, x.FreshUntil, Availability = x.Availability.ToString() })),
-            GeneratedAt = review.GeneratedAt
+            GeneratedAt = review.GeneratedAt.ToUniversalTime()
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -63,6 +64,13 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
         bool retryable,
         CancellationToken cancellationToken)
     {
+        dbContext.AnalysisEvidence.RemoveRange(
+            dbContext.AnalysisEvidence.Local
+                .Where(x => x.AnalysisRunId == run.Id));
+        dbContext.AnalysisResults.RemoveRange(
+            dbContext.AnalysisResults.Local
+                .Where(x => x.AnalysisRunId == run.Id));
+
         run.Status = retryable
             ? Domain.Analysis.AnalysisRunStatus.Retryable
             : Domain.Analysis.AnalysisRunStatus.Failed;
@@ -71,8 +79,17 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
         run.ErrorMessage = errorMessage;
         run.CompletedAt = DateTimeOffset.UtcNow;
         run.LastHeartbeatAt = run.CompletedAt;
+        NormalizeRunTimestamps(run);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void NormalizeRunTimestamps(AnalysisRun run)
+    {
+        run.CreatedAt = run.CreatedAt.ToUniversalTime();
+        run.StartedAt = run.StartedAt?.ToUniversalTime();
+        run.CompletedAt = run.CompletedAt?.ToUniversalTime();
+        run.LastHeartbeatAt = run.LastHeartbeatAt?.ToUniversalTime();
     }
 
     public Task<AnalysisResult?> GetPriorSuccessfulResultAsync(

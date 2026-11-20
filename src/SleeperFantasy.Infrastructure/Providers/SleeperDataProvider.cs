@@ -341,14 +341,23 @@ public sealed class SleeperDataProvider(
 
     private static PlayerRecord? ParsePlayer(string id, JsonElement value)
     {
+        var firstName = value.GetString("first_name");
+        var lastName = value.GetString("last_name");
         var name = value.GetString("full_name");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = string.Join(
+                ' ',
+                new[] { firstName, lastName }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        }
+
         return string.IsNullOrWhiteSpace(name)
             ? null
             : new PlayerRecord(
                 id,
                 name,
-                value.GetString("first_name"),
-                value.GetString("last_name"),
+                firstName,
+                lastName,
                 value.GetString("position"),
                 value.GetString("team"),
                 value.GetString("injury_status"),

@@ -144,6 +144,7 @@ public sealed class WaiverRankingService
         }
 
         var ordered = recommendations
+            .Where(x => x.Score > 0m)
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.PlayerName, StringComparer.Ordinal)
             .Select((x, index) => x with { Priority = index + 1 })

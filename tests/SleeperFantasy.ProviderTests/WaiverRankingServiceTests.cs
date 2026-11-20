@@ -46,7 +46,8 @@ public sealed class WaiverRankingServiceTests
             fixture.Snapshot,
             fixture.RosterRisk,
             availability,
-            [],
+            [new PlayerPerformanceRecord("free", "ABC", "WR", "2026", 4,
+                new Dictionary<string, decimal> { ["fantasy_points"] = 1 }, DateTimeOffset.UtcNow)],
             [],
             [],
             DateTimeOffset.UtcNow);
@@ -55,5 +56,33 @@ public sealed class WaiverRankingServiceTests
         Assert.Equal(1, recommendation.Priority);
         Assert.True(recommendation.IsStale);
         Assert.False(result.IsComplete);
+    }
+
+    [Fact]
+    public void Excludes_zero_score_players()
+    {
+        var fixture = new AnalysisFixture();
+        var availability = new AvailabilityPool(
+            [
+                new AvailablePlayer("positive", "Positive Player", "WR", "ABC", DateTimeOffset.UtcNow, ["WR"], true),
+                new AvailablePlayer("zero", "Zero Player", "WR", "ABC", DateTimeOffset.UtcNow, ["WR"], true)
+            ],
+            DateTimeOffset.UtcNow,
+            true,
+            []);
+
+        var result = new WaiverRankingService().Rank(
+            fixture.Snapshot,
+            fixture.RosterRisk,
+            availability,
+            [new PlayerPerformanceRecord("positive", "ABC", "WR", "2026", 4,
+                new Dictionary<string, decimal> { ["fantasy_points"] = 1 }, DateTimeOffset.UtcNow)],
+            [],
+            [],
+            DateTimeOffset.UtcNow);
+
+        var recommendation = Assert.Single(result.Recommendations);
+        Assert.Equal("positive", recommendation.PlayerId);
+        Assert.Equal(1, recommendation.Priority);
     }
 }

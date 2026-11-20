@@ -64,6 +64,37 @@ public sealed class AnalysisPersistenceServiceTests
         Assert.Equal("prior", await db.AnalysisResults.Select(x => x.ResultJson).SingleAsync());
     }
 
+    [Fact]
+    public async Task Normalizes_provider_timestamps_to_utc_before_persistence()
+    {
+        await using var db = CreateDb();
+        var fixture = new AnalysisFixture();
+        var observedAt = new DateTimeOffset(2026, 11, 20, 8, 0, 0, TimeSpan.FromHours(-5));
+        var evidence = fixture.Evidence with
+        {
+            ObservedAt = observedAt,
+            FreshUntil = observedAt.AddHours(1)
+        };
+        var review = fixture.Review with
+        {
+            GeneratedAt = observedAt,
+            Deterministic = fixture.Deterministic with { Evidence = [evidence] }
+        };
+        var run = CreateRun(fixture.Configuration);
+        db.ManagerConfigurations.Add(fixture.Configuration);
+        db.AnalysisRuns.Add(run);
+
+        await new AnalysisPersistenceService(db)
+            .PersistSuccessfulAsync(run, review, CancellationToken.None);
+
+        var storedEvidence = await db.AnalysisEvidence.SingleAsync();
+        var storedResult = await db.AnalysisResults.SingleAsync();
+        Assert.Equal(TimeSpan.Zero, storedEvidence.ObservedAt.Offset);
+        Assert.Equal(observedAt, storedEvidence.ObservedAt);
+        Assert.Equal(TimeSpan.Zero, storedResult.GeneratedAt.Offset);
+        Assert.Equal(observedAt, storedResult.GeneratedAt);
+    }
+
     private static AppDbContext CreateDb() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())

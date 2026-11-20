@@ -56,7 +56,15 @@ public sealed class LanguageModelAnalysisService(ILanguageModelProvider provider
         
         if (!result.IsSuccessful || result.Value is null)
         {
-            caveats.Add("Contextual analysis is unavailable; deterministic findings remain authoritative.");
+            var failureDetail = string.IsNullOrWhiteSpace(result.ErrorCode)
+                ? string.Empty
+                : $" ({result.Provider}: {result.ErrorCode})";
+            var failureMessage = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                ? string.Empty
+                : $" Details: {result.ErrorMessage}";
+            caveats.Add(
+                $"Contextual analysis is unavailable{failureDetail}.{failureMessage} " +
+                "Deterministic findings remain authoritative.");
             return new AnalysisReview(
                 deterministic,
                 null,

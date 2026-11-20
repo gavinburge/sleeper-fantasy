@@ -180,6 +180,151 @@ curl -b cookies.txt -c cookies.txt \
 curl -b cookies.txt http://localhost:5142/api/v1/league
 ```
 
+Make sure the saved `leagueId` and `rosterId` are the real values returned by
+your discovery request. Values such as `league-1`, `roster-1`, or
+`fixture-league` belong to automated tests and will produce Sleeper `404`
+responses when used against the live API.
+
+## Run an analysis locally
+
+The local API does not start a background worker automatically. In
+development, `POST /api/v1/analysis/run` queues one run and a separate Worker
+process claims and executes it. Both processes use the same PostgreSQL
+database. The default local trigger logs that the run is queued; it does not
+contact Cloud Run.
+
+### 1. Queue analysis for the saved team
+
+You do **not** run the analysis twice. The API request below creates the
+queued job and returns its ID. It does not execute the analysis itself.
+The analysis is scoped to the authenticated application session: the API
+looks up that user's saved league and roster configuration. You do not include
+a Sleeper username, league ID, or roster ID in this request.
+
+Fetch a fresh antiforgery token before the POST:
+
+```bash
+token=$(curl -sS -b cookies.txt -c cookies.txt \
+  http://localhost:5142/api/auth/antiforgery \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -sS -b cookies.txt -c cookies.txt \
+  -H "RequestVerificationToken: $token" \
+  -X POST \
+  http://localhost:5142/api/v1/analysis/run \
+  | tee analysis-run.json
+
+run_id=$(python3 -c \
+  'import json,sys; print(json.load(open("analysis-run.json"))["id"])')
+echo "$run_id"
+```
+
+The response is `202 Accepted`. `run_id` is the ID of the queued analysis
+created for your saved team.
+
+### 2. Run the Worker for that queued ID
+
+Keep the API running, then use a second terminal. Start the Worker once with
+the ID returned by the previous step:
+
+```bash
+dotnet run --project src/SleeperFantasy.Worker -- \
+  --analysis-run-id "$run_id"
+```
+
+The Worker refreshes Sleeper, nflverse, and injury data, computes deterministic
+roster risks and waiver rankings, optionally requests Gemini explanations, and
+stores the completed review in PostgreSQL. A completed run is not executed
+again if the same command is repeated.
+
+### 3. Read the analysis result
+
+```bash
+curl -sS -b cookies.txt \
+  http://localhost:5142/api/v1/analysis/latest \
+  | python3 -m json.tool
+```
+
+Poll the same endpoint while the Worker is running. A queued or running
+response has `"result": null`; a completed response contains the review under
+`result`, including roster risks, waiver recommendations, evidence timestamps,
+confidence, stale markers, and limitations. A failed or stale run reports its
+error metadata and preserves the prior successful result when one exists.
+
+If you omit `--analysis-run-id`, the Worker claims the oldest queued run and
+then remains idle:
+
+```bash
+dotnet run --project src/SleeperFantasy.Worker
+```
+
+This is useful for repeatedly testing manual runs, but the explicit ID form is
+easier to correlate with one request.
+
+If the Worker reports that a run is already claimed, inspect its current state:
+
+```bash
+curl -sS -b cookies.txt \
+  http://localhost:5142/api/v1/analysis/latest \
+  | python3 -m json.tool
+```
+
+If the status is `running` and `lastHeartbeatAt` is recent, another Worker is
+still executing it; do not start a second copy. If the previous Worker
+crashed, the API and Worker recover the run after the 10-minute heartbeat
+timeout. Requesting `latest` after that timeout changes it to `retryable` or
+`stale`, after which a new run or retry can be started.
+
+### Optional Gemini explanations
+
+Analysis works without Gemini and retains deterministic findings. To enable
+server-side contextual explanations, set the key for the Worker process
+without committing it:
+
+```bash
+export Providers__LanguageModel=Gemini
+export Providers__GeminiApiKey='your-server-only-key'
+dotnet run --project src/SleeperFantasy.Worker -- \
+  --analysis-run-id "$run_id"
+```
+
+The API and Worker are separate processes. Export the variables in the same
+terminal that starts the Worker; exporting them only for the API terminal does
+not configure the Worker. Verify the key is present without printing it:
+
+```bash
+test -n "$Providers__GeminiApiKey" && echo "Gemini key is configured"
+```
+
+The analysis response reports a provider error code in its caveats if Gemini
+cannot run, such as `MISSING_API_KEY`, `MODEL_UNAVAILABLE`, or `TIMEOUT`.
+
+Use the same provider configuration as the API and keep the key out of the
+browser, source control, and logs. See [`docs/providers.md`](docs/providers.md)
+for freshness and failure behavior.
+
+### Retry a failed run
+
+Retry only after inspecting `errorCode`, `errorMessage`, and the affected
+stage/provider:
+
+```bash
+token=$(curl -sS -b cookies.txt -c cookies.txt \
+  http://localhost:5142/api/auth/antiforgery \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -sS -b cookies.txt -c cookies.txt \
+  -H "RequestVerificationToken: $token" \
+  -X POST \
+  "http://localhost:5142/api/v1/analysis/$run_id/retry" \
+  | tee retry-run.json
+
+retry_id=$(python3 -c \
+  'import json; print(json.load(open("retry-run.json"))["id"])')
+dotnet run --project src/SleeperFantasy.Worker -- \
+  --analysis-run-id "$retry_id"
+```
+
 ## Run the web project
 
 In a second terminal:
@@ -206,11 +351,14 @@ POST /api/auth/logout                      Clear the session cookie
 GET  /api/v1/league/discovery               Discover Sleeper leagues and rosters
 GET  /api/v1/league                        Read saved league configuration
 POST /api/v1/league/configuration           Save selected league and roster
+POST /api/v1/analysis/run                   Queue an analysis for the saved team
+GET  /api/v1/analysis/latest               Read analysis status and latest result
+POST /api/v1/analysis/{runId}/retry         Retry a failed or stale analysis
 ```
 
-All `/api/v1/league` routes require authentication. POST requests require the
-antiforgery cookie and `RequestVerificationToken` header. Provider calls remain
-server-side; clients never call Sleeper directly.
+All `/api/v1/league` and `/api/v1/analysis` routes require authentication. POST
+requests require the antiforgery cookie and `RequestVerificationToken` header.
+Provider calls remain server-side; clients never call Sleeper directly.
 
 ## Run tests and build
 
@@ -221,6 +369,12 @@ PostgreSQL 17 Testcontainers instance, so Docker must be running.
 dotnet test tests/SleeperFantasy.ProviderTests/SleeperFantasy.ProviderTests.csproj
 dotnet build SleeperFantasy.slnx
 ```
+
+The API end-to-end tests use a disposable PostgreSQL 17 Testcontainers
+database. To exercise the real local pipeline, use the analysis steps above
+with a configured Sleeper username, season, league, and roster. The default
+`LanguageModel=None` setting keeps that run offline from Gemini while still
+producing deterministic roster-risk and waiver output.
 
 ## Optional providers
 

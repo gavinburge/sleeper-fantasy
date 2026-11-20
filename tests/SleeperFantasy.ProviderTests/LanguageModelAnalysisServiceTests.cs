@@ -41,6 +41,7 @@ public sealed class LanguageModelAnalysisServiceTests
         Assert.False(review.ContextualAnalysisAvailable);
         Assert.Same(deterministic, review.Deterministic);
         Assert.Contains("unavailable", review.Caveats.Single(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("UNAVAILABLE", review.Caveats.Single(), StringComparison.Ordinal);
     }
 
     [Fact]
