@@ -75,6 +75,8 @@ public static class DependencyInjection
         services.AddScoped<WaiverRankingService>();
         services.AddScoped<LanguageModelAnalysisService>();
         services.AddScoped<AnalysisOrchestrator>();
+        services.AddScoped<IAnalysisOrchestrator>(sp =>
+            sp.GetRequiredService<AnalysisOrchestrator>());
         services.AddScoped<AnalysisPersistenceService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<AnalysisRunExecutor>();

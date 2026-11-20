@@ -32,7 +32,7 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
                 EvidenceType = evidence.EvidenceType,
                 SubjectKey = evidence.SubjectKey,
                 IdentityKey = evidence.IdentityKey,
-                PayloadJson = evidence.Fact,
+                PayloadJson = JsonSerializer.Serialize(evidence.Fact),
                 Availability = evidence.Availability.ToString(),
                 IsStale = evidence.IsStale(now),
                 ObservedAt = evidence.ObservedAt,

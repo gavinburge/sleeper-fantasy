@@ -9,6 +9,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SleeperFantasy.Application.Features.Analysis;
+using SleeperFantasy.Domain.Analysis;
+using SleeperFantasy.Domain.Entities;
 using SleeperFantasy.Domain.Providers;
 using SleeperFantasy.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
@@ -22,6 +24,8 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
         .Build();
 
     private AnalysisFixture fixture = null!;
+    private StubLeagueProvider leagueProvider = null!;
+    private TransientFailureState failureState = null!;
     private CapturingTrigger trigger = null!;
     private ApiFactory factory = null!;
     private HttpClient client = null!;
@@ -42,8 +46,15 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
                 ["free"] = "00-FREE"
             }
         };
+        leagueProvider = new StubLeagueProvider(fixture);
+        failureState = new TransientFailureState();
         trigger = new CapturingTrigger();
-        factory = new ApiFactory(postgres.GetConnectionString(), fixture, trigger);
+        factory = new ApiFactory(
+            postgres.GetConnectionString(),
+            fixture,
+            leagueProvider,
+            failureState,
+            trigger);
         client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false,
@@ -133,6 +144,94 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task Transient_failure_creates_a_bounded_retry_that_can_complete()
+    {
+        await AuthenticateAndConfigureAsync();
+        failureState.FailNext = true;
+
+        var queued = await StartAnalysisAsync();
+        await ExecuteAsync(queued.Id, "first-attempt");
+
+        var retrying = await client.GetFromJsonAsync<AnalysisLatestResponse>(
+            "/api/v1/analysis/latest");
+        Assert.NotNull(retrying);
+        Assert.Equal("queued", retrying!.Run.Status);
+        Assert.Equal(2, retrying.Run.Attempt);
+        Assert.Equal(queued.Id, retrying.Run.RetryOfRunId);
+        Assert.Equal(2, trigger.RunIds.Count);
+
+        await ExecuteAsync(retrying.Run.Id, "second-attempt");
+
+        var completed = await client.GetFromJsonAsync<AnalysisLatestResponse>(
+            "/api/v1/analysis/latest");
+        Assert.NotNull(completed);
+        Assert.Equal("completed", completed!.Run.Status);
+        Assert.Equal(2, completed.Run.Attempt);
+        Assert.NotNull(completed.Result);
+    }
+
+    [Fact]
+    public async Task Failed_latest_preserves_prior_result_and_manual_retry_is_linked()
+    {
+        await AuthenticateAndConfigureAsync();
+
+        Guid failedRunId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var configuration = await db.ManagerConfigurations.SingleAsync();
+            var priorRun = new AnalysisRun
+            {
+                Id = Guid.NewGuid(),
+                ManagerConfigurationId = configuration.Id,
+                Status = "running",
+                Attempt = 1,
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-2)
+            };
+            db.AnalysisRuns.Add(priorRun);
+            await new AnalysisPersistenceService(db).PersistSuccessfulAsync(
+                priorRun,
+                fixture.Review,
+                CancellationToken.None);
+
+            var failedRun = new AnalysisRun
+            {
+                Id = Guid.NewGuid(),
+                ManagerConfigurationId = configuration.Id,
+                Status = "failed",
+                Attempt = 1,
+                Stage = "failed",
+                ErrorCode = "SOURCE_UNAVAILABLE",
+                ErrorMessage = "The fixture source failed.",
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            failedRunId = failedRun.Id;
+            db.AnalysisRuns.Add(failedRun);
+            await db.SaveChangesAsync();
+        }
+
+        var failed = await client.GetFromJsonAsync<AnalysisLatestResponse>(
+            "/api/v1/analysis/latest");
+        Assert.NotNull(failed);
+        Assert.Equal(failedRunId, failed!.Run.Id);
+        Assert.Equal("failed", failed.Run.Status);
+        Assert.NotNull(failed.Result);
+
+        var token = await GetAntiforgeryTokenAsync();
+        using var retryRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/v1/analysis/{failedRunId}/retry");
+        retryRequest.Headers.Add("RequestVerificationToken", token);
+        var retryResponse = await client.SendAsync(retryRequest);
+
+        Assert.Equal(HttpStatusCode.Accepted, retryResponse.StatusCode);
+        var retry = await retryResponse.Content.ReadFromJsonAsync<AnalysisRunResponse>();
+        Assert.NotNull(retry);
+        Assert.Equal(failedRunId, retry!.RetryOfRunId);
+        Assert.Contains(retry.Id, trigger.RunIds);
+    }
+
     private async Task AuthenticateAndConfigureAsync()
     {
         var token = await GetAntiforgeryTokenAsync();
@@ -166,6 +265,25 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(save)).StatusCode);
     }
 
+    private async Task<AnalysisRunResponse> StartAnalysisAsync()
+    {
+        var token = await GetAntiforgeryTokenAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/analysis/run");
+        request.Headers.Add("RequestVerificationToken", token);
+        var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<AnalysisRunResponse>()
+            ?? throw new InvalidOperationException("The analysis start response was empty.");
+    }
+
+    private async Task ExecuteAsync(Guid runId, string executionId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<IAnalysisRunExecutor>()
+            .ExecuteAsync(runId, executionId, CancellationToken.None);
+    }
+
     private async Task<string> GetAntiforgeryTokenAsync()
     {
         var response = await client.GetFromJsonAsync<JsonElement>("/api/auth/antiforgery");
@@ -176,6 +294,8 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
     private sealed class ApiFactory(
         string connectionString,
         AnalysisFixture fixture,
+        StubLeagueProvider leagueProvider,
+        TransientFailureState failureState,
         CapturingTrigger trigger) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -195,8 +315,9 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
                 services.RemoveAll<IPerformanceDataProvider>();
                 services.RemoveAll<IInjuryDataProvider>();
                 services.RemoveAll<ILanguageModelProvider>();
+                services.RemoveAll<IAnalysisOrchestrator>();
                 services.RemoveAll<IAnalysisExecutionTrigger>();
-                services.AddSingleton<ILeagueDataProvider>(new StubLeagueProvider(fixture));
+                services.AddSingleton<ILeagueDataProvider>(leagueProvider);
                 services.AddSingleton<IPerformanceDataProvider>(new StubPerformanceProvider(fixture));
                 services.AddSingleton<IInjuryDataProvider>(new StubInjuryProvider());
                 services.AddSingleton<ILanguageModelProvider>(
@@ -209,8 +330,36 @@ public sealed class AnalysisLifecycleEndToEndTests : IAsyncLifetime
                             [],
                             DateTimeOffset.UtcNow)
                     });
+                services.AddSingleton(failureState);
+                services.AddScoped<IAnalysisOrchestrator>(sp =>
+                    new ControllableAnalysisOrchestrator(
+                        sp.GetRequiredService<AnalysisOrchestrator>(),
+                        failureState));
                 services.AddSingleton<IAnalysisExecutionTrigger>(trigger);
             });
+        }
+    }
+
+    private sealed class TransientFailureState
+    {
+        public bool FailNext { get; set; }
+    }
+
+    private sealed class ControllableAnalysisOrchestrator(
+        AnalysisOrchestrator inner,
+        TransientFailureState state) : IAnalysisOrchestrator
+    {
+        public Task<AnalysisReview> AnalyzeAsync(
+            ManagerConfiguration configuration,
+            CancellationToken cancellationToken)
+        {
+            if (state.FailNext)
+            {
+                state.FailNext = false;
+                throw new HttpRequestException("fixture transient failure");
+            }
+
+            return inner.AnalyzeAsync(configuration, cancellationToken);
         }
     }
 

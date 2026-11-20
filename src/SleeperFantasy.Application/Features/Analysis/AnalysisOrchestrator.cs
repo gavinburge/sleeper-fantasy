@@ -3,12 +3,19 @@ using SleeperFantasy.Domain.Entities;
 
 namespace SleeperFantasy.Application.Features.Analysis;
 
+public interface IAnalysisOrchestrator
+{
+    Task<AnalysisReview> AnalyzeAsync(
+        ManagerConfiguration configuration,
+        CancellationToken cancellationToken);
+}
+
 public sealed class AnalysisOrchestrator(
     SourceRefreshService refreshService,
     RosterRiskAnalyzer rosterRiskAnalyzer,
     AvailablePlayerService availablePlayerService,
     WaiverRankingService waiverRankingService,
-    LanguageModelAnalysisService languageModelAnalysisService)
+    LanguageModelAnalysisService languageModelAnalysisService) : IAnalysisOrchestrator
 {
     public async Task<AnalysisReview> AnalyzeAsync(
         ManagerConfiguration configuration,

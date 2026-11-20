@@ -8,7 +8,7 @@ namespace SleeperFantasy.Application.Features.Analysis;
 public sealed class AnalysisRunExecutor(
     IAppDbContext dbContext,
     AnalysisRunService runService,
-    AnalysisOrchestrator orchestrator,
+    IAnalysisOrchestrator orchestrator,
     AnalysisPersistenceService persistenceService,
     IAnalysisExecutionTrigger executionTrigger,
     ILogger<AnalysisRunExecutor> logger) : IAnalysisRunExecutor
