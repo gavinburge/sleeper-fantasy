@@ -57,13 +57,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Status).HasMaxLength(30).IsRequired();
             entity.Property(x => x.CloudRunExecutionId).HasMaxLength(200);
             entity.Property(x => x.Stage).HasMaxLength(100);
+            entity.Property(x => x.Provider).HasMaxLength(100);
             entity.Property(x => x.ErrorCode).HasMaxLength(100);
             entity.Property(x => x.ErrorMessage).HasMaxLength(4000);
             entity.HasIndex(x => new { x.ManagerConfigurationId, x.CreatedAt });
+            entity.HasIndex(x => x.ManagerConfigurationId)
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('queued', 'running')");
             entity.HasOne(x => x.ManagerConfiguration)
                 .WithMany()
                 .HasForeignKey(x => x.ManagerConfigurationId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.RetryOfRun)
+                .WithMany()
+                .HasForeignKey(x => x.RetryOfRunId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AnalysisEvidence>(entity =>

@@ -34,7 +34,12 @@ public static class DependencyInjection
         }
 
         services.AddOptions<DatabaseOptions>()
-            .Configure(options => options.ConnectionString = connectionString)
+            .Configure(options =>
+            {
+                options.ConnectionString = connectionString;
+                options.ApplyMigrations = configuration.GetValue<bool>(
+                    $"{DatabaseOptions.SectionName}:ApplyMigrations");
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddOptions<ProviderOptions>()
@@ -71,6 +76,10 @@ public static class DependencyInjection
         services.AddScoped<LanguageModelAnalysisService>();
         services.AddScoped<AnalysisOrchestrator>();
         services.AddScoped<AnalysisPersistenceService>();
+        services.AddScoped<AnalysisRunService>();
+        services.AddScoped<AnalysisRunExecutor>();
+        services.AddScoped<IAnalysisRunExecutor>(sp => sp.GetRequiredService<AnalysisRunExecutor>());
+        services.AddScoped<IAnalysisExecutionTrigger, CloudRunAnalysisExecutionTrigger>();
         services.AddSingleton<IPlayerIdentityResolver, PlayerIdentityResolver>();
         services.AddSingleton<IProviderResponseCache, ProviderResponseCache>();
 

@@ -34,13 +34,13 @@
 
 ## 5. Asynchronous analysis API and worker
 
-- [ ] 5.1 Implement analysis-run state transitions, deduplication, heartbeats, retry policy, and recovery of abandoned executions; verify queued, running, completed, failed, retryable, and stale transitions.
-- [ ] 5.2 Implement the .NET Worker entry point for Cloud Run Job execution; verify a fixture run completes, a process interruption is recoverable, and repeated execution is idempotent.
-- [ ] 5.3 Implement `POST /api/v1/analysis/run` with authenticated `202 Accepted` responses and active-job reuse; verify repeated requests do not create duplicate work.
-- [ ] 5.4 Implement `GET /api/v1/analysis/latest` with status-specific response contracts and completed-result delivery; verify running jobs do not expose incomplete recommendations and failed jobs preserve prior results.
-- [ ] 5.5 Implement manual retry and Cloud Run Job execution triggering with the Google Cloud .NET client; verify retry attempts link to the original run and completed results are preserved.
-- [ ] 5.6 Add structured execution logging, Cloud Run execution ID correlation, and status reconciliation; verify logs and API status expose stage, provider, attempt, and failure category without secrets.
-- [ ] 5.7 Add API contract tests independent of the web UI; verify a second client can start, observe, retry, and read the same job/result representations.
+- [x] 5.1 Implement analysis-run state transitions, deduplication, heartbeats, retry policy, and recovery of abandoned executions; verify queued, running, completed, failed, retryable, and stale transitions.
+- [x] 5.2 Implement the .NET Worker entry point for Cloud Run Job execution; verify a fixture run completes, a process interruption is recoverable, and repeated execution is idempotent.
+- [x] 5.3 Implement `POST /api/v1/analysis/run` with authenticated `202 Accepted` responses and active-job reuse; verify repeated requests do not create duplicate work.
+- [x] 5.4 Implement `GET /api/v1/analysis/latest` with status-specific response contracts and completed-result delivery; verify running jobs do not expose incomplete recommendations and failed jobs preserve prior results.
+- [x] 5.5 Implement manual retry and Cloud Run Job execution triggering with the Google Cloud .NET client; verify retry attempts link to the original run and completed results are preserved.
+- [x] 5.6 Add structured execution logging, Cloud Run execution ID correlation, and status reconciliation; verify logs and API status expose stage, provider, attempt, and failure category without secrets.
+- [x] 5.7 Add API contract tests independent of the web UI; verify a second client can start, observe, retry, and read the same job/result representations.
 
 ## 6. Web client
 

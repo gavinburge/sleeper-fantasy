@@ -280,6 +280,13 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ManagerConfigurationId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Provider")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("RetryOfRunId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Stage")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -293,6 +300,12 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(30)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ManagerConfigurationId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('queued', 'running')");
+
+                    b.HasIndex("RetryOfRunId");
 
                     b.HasIndex("ManagerConfigurationId", "CreatedAt");
 
@@ -573,7 +586,14 @@ namespace SleeperFantasy.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SleeperFantasy.Domain.Entities.AnalysisRun", "RetryOfRun")
+                        .WithMany()
+                        .HasForeignKey("RetryOfRunId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ManagerConfiguration");
+
+                    b.Navigation("RetryOfRun");
                 });
 
             modelBuilder.Entity("SleeperFantasy.Domain.Entities.AnalysisRun", b =>

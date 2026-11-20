@@ -97,6 +97,64 @@ public sealed class LeagueApiEndToEndTests : IAsyncLifetime
         Assert.Equal(2026, configuration.Season);
     }
 
+    [Fact]
+    public async Task Second_client_request_reuses_the_same_queued_analysis_run()
+    {
+        var antiforgeryToken = await GetAntiforgeryTokenAsync();
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                email = "admin@example.invalid",
+                password = "LocalDevelopmentPassword1!",
+                rememberMe = false
+            })
+        };
+        login.Headers.Add("RequestVerificationToken", antiforgeryToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(login)).StatusCode);
+
+        antiforgeryToken = await GetAntiforgeryTokenAsync();
+        using var save = new HttpRequestMessage(HttpMethod.Post, "/api/v1/league/configuration")
+        {
+            Content = JsonContent.Create(new
+            {
+                username = "fixture-manager",
+                season = 2026,
+                leagueId = "fixture-league",
+                rosterId = "8",
+                teamName = (string?)null
+            })
+        };
+        save.Headers.Add("RequestVerificationToken", antiforgeryToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(save)).StatusCode);
+
+        async Task<(HttpStatusCode Status, AnalysisRunResponse? Run)> StartAsync()
+        {
+            var token = await GetAntiforgeryTokenAsync();
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/analysis/run");
+            request.Headers.Add("RequestVerificationToken", token);
+            var response = await client.SendAsync(request);
+            return (
+                response.StatusCode,
+                await response.Content.ReadFromJsonAsync<AnalysisRunResponse>());
+        }
+
+        var responses = await Task.WhenAll(StartAsync(), StartAsync());
+        var first = responses[0];
+        var second = responses[1];
+
+        Assert.Equal(HttpStatusCode.Accepted, first.Status);
+        Assert.Equal(HttpStatusCode.Accepted, second.Status);
+        Assert.NotNull(first.Run);
+        Assert.Equal(first.Run!.Id, second.Run!.Id);
+
+        var latest = await client.GetFromJsonAsync<AnalysisLatestResponse>("/api/v1/analysis/latest");
+        Assert.NotNull(latest);
+        Assert.Equal(first.Run.Id, latest!.Run.Id);
+        Assert.Equal("queued", latest.Run.Status);
+        Assert.Null(latest.Result);
+    }
+
     private async Task<string> GetAntiforgeryTokenAsync()
     {
         var response = await client.GetFromJsonAsync<JsonElement>("/api/auth/antiforgery");
@@ -202,6 +260,26 @@ public sealed class LeagueApiEndToEndTests : IAsyncLifetime
     }
 
     private sealed record SessionResponse(bool Authenticated);
+
+    private sealed record AnalysisRunResponse(
+        Guid Id,
+        string Status,
+        int Attempt,
+        string? Stage,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? StartedAt,
+        DateTimeOffset? CompletedAt,
+        DateTimeOffset? LastHeartbeatAt,
+        string? CloudRunExecutionId,
+        string? Provider,
+        string? ErrorCode,
+        string? ErrorMessage,
+        bool RetryAvailable,
+        Guid? RetryOfRunId);
+
+    private sealed record AnalysisLatestResponse(
+        AnalysisRunResponse Run,
+        JsonElement? Result);
 
     private sealed record LeagueDiscoveryResponse(
         SleeperUser User,

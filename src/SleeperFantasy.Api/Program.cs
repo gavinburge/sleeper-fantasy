@@ -2,6 +2,7 @@ using SleeperFantasy.Application.Features.Authentication;
 using SleeperFantasy.Infrastructure;
 using SleeperFantasy.Infrastructure.Identity;
 using SleeperFantasy.Infrastructure.Persistence;
+using SleeperFantasy.Application.Features.Analysis;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -25,6 +26,7 @@ app.UseAntiforgery();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthenticationEndpoints();
+app.MapAnalysisEndpoints();
 
 if (app.Environment.IsDevelopment())
 {

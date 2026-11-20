@@ -14,7 +14,8 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        run.Status = "completed";
+
+        run.Status = Domain.Analysis.AnalysisRunStatus.Completed;
         run.Stage = "persisted";
         run.CompletedAt = now;
         run.LastHeartbeatAt = now;
@@ -51,7 +52,7 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
                 .Select(x => new { x.EvidenceId, x.Provider, x.ObservedAt, x.FreshUntil, Availability = x.Availability.ToString() })),
             GeneratedAt = review.GeneratedAt
         });
-        
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -62,12 +63,15 @@ public sealed class AnalysisPersistenceService(IAppDbContext dbContext)
         bool retryable,
         CancellationToken cancellationToken)
     {
-        run.Status = retryable ? "retryable" : "failed";
+        run.Status = retryable
+            ? Domain.Analysis.AnalysisRunStatus.Retryable
+            : Domain.Analysis.AnalysisRunStatus.Failed;
         run.Stage = "failed";
         run.ErrorCode = errorCode;
         run.ErrorMessage = errorMessage;
         run.CompletedAt = DateTimeOffset.UtcNow;
         run.LastHeartbeatAt = run.CompletedAt;
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
