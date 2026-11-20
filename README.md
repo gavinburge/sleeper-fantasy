@@ -303,6 +303,28 @@ Use the same provider configuration as the API and keep the key out of the
 browser, source control, and logs. See [`docs/providers.md`](docs/providers.md)
 for freshness and failure behavior.
 
+The API key is associated with a Google AI Studio project. That project must
+have Gemini API free-tier access or billing enabled. A key can successfully
+list models while still receiving `403 PERMISSION_DENIED` from
+`generateContent` when the project is not eligible for the free tier. Verify
+generation access with the selected model:
+
+```bash
+model="${Providers__GeminiModel#models/}"
+
+curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+  -H "x-goog-api-key: $Providers__GeminiApiKey" \
+  -H "Content-Type: application/json" \
+  -d '{"contents":[{"parts":[{"text":"Reply with OK"}]}]}' \
+  "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent"
+```
+
+If the response says that the free tier is unavailable for the project,
+enable billing at <https://aistudio.google.com/billing> or create the key
+under a project with free-tier access. Otherwise, deterministic analysis still
+runs and the response identifies that Gemini contextual analysis is
+unavailable.
+
 ### Retry a failed run
 
 Retry only after inspecting `errorCode`, `errorMessage`, and the affected
@@ -333,9 +355,15 @@ In a second terminal:
 dotnet run --project src/SleeperFantasy.Web --urls http://localhost:5187
 ```
 
-The web project currently contains the Blazor shell and starter home page. The
-league setup UI is not wired yet; use the API directly or continue with the
-remaining web tasks.
+The league setup UI is available at <http://localhost:5187/setup>. The web
+project uses `ApiBaseUrl` from
+`src/SleeperFantasy.Web/appsettings.Development.json` to call the local API;
+keep the API running on port 5142.
+
+After signing in with the development administrator account, enter a Sleeper
+username and season, select the league and manager-owned roster, and save the
+configuration. Provider credentials remain server-side and are never entered
+in the web UI.
 
 ## API endpoint reference
 

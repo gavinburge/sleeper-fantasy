@@ -1,0 +1,329 @@
+@page "/setup"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using System.Text.Json
+@inject IJSRuntime Js
+
+<PageTitle>League setup</PageTitle>
+
+<div class="setup-shell">
+    <header class="page-header">
+        <p class="eyebrow">Sleeper Fantasy Advisor</p>
+        <h1>Configure your league</h1>
+        <p class="lede">Connect a Sleeper league so weekly analysis can use the right roster and scoring context.</p>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="status-message" role="status">Checking your sign-in session...</p>
+    }
+    else if (!_authenticated)
+    {
+        <section class="setup-card" aria-labelledby="sign-in-heading">
+            <h2 id="sign-in-heading">Sign in to continue</h2>
+            <p class="muted">Your Sleeper credentials are never requested. Sign in with the application administrator account.</p>
+            <EditForm Model="_login" OnValidSubmit="SignInAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <label>
+                    Email
+                    <InputText @bind-Value="_login.Email" type="email" autocomplete="username" />
+                    <ValidationMessage For="() => _login.Email" />
+                </label>
+                <label>
+                    Password
+                    <InputText @bind-Value="_login.Password" type="password" autocomplete="current-password" />
+                    <ValidationMessage For="() => _login.Password" />
+                </label>
+                <button type="submit" disabled="@_busy">Sign in</button>
+            </EditForm>
+        </section>
+    }
+    else
+    {
+        <section class="setup-card" aria-labelledby="lookup-heading">
+            <h2 id="lookup-heading">Find your Sleeper leagues</h2>
+            <p class="muted">Enter a public Sleeper username and season. The lookup runs on the server; no Sleeper token is required.</p>
+            <EditForm Model="_lookup" OnValidSubmit="DiscoverAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="form-grid">
+                    <label>
+                        Sleeper username
+                        <InputText @bind-Value="_lookup.Username" autocomplete="off" />
+                        <ValidationMessage For="() => _lookup.Username" />
+                    </label>
+                    <label>
+                        Season
+                        <InputNumber @bind-Value="_lookup.Season" />
+                        <ValidationMessage For="() => _lookup.Season" />
+                    </label>
+                </div>
+                <button type="submit" disabled="@_busy">Find leagues</button>
+            </EditForm>
+        </section>
+
+        @if (_discovery is not null)
+        {
+            <section class="setup-card" aria-labelledby="selection-heading">
+                <h2 id="selection-heading">Select your team</h2>
+                <p class="muted">Choose a league and the roster owned by <strong>@_discovery.User.Username</strong>.</p>
+                <EditForm Model="_selection" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <label>
+                        League
+                        <InputSelect @bind-Value="_selection.LeagueId">
+                            <option value="">Select a league</option>
+                            @foreach (var league in _discovery.Leagues)
+                            {
+                                <option value="@league.League.LeagueId">
+                                    @league.League.Name (@league.League.Season, @league.League.Status)
+                                </option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => _selection.LeagueId" />
+                    </label>
+
+                    @if (SelectedLeague is not null)
+                    {
+                        <label>
+                            Roster
+                            <InputSelect @bind-Value="_selection.RosterId">
+                                <option value="">Select your roster</option>
+                                @foreach (var team in SelectedLeague.Teams.Where(team => team.IsManagerTeam))
+                                {
+                                    <option value="@team.RosterId">@team.TeamName (roster @team.RosterId)</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="() => _selection.RosterId" />
+                        </label>
+                        @if (!SelectedLeague.Teams.Any(team => team.IsManagerTeam))
+                        {
+                            <p class="inline-error" role="alert">No roster owned by this Sleeper user was found in the selected league.</p>
+                        }
+                    }
+
+                    <button type="submit" disabled="@(_busy || SelectedLeague is null)">Save league configuration</button>
+                </EditForm>
+            </section>
+        }
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <p class="error-banner" role="alert">@_error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(_success))
+    {
+        <p class="success-banner" role="status">@_success</p>
+    }
+</div>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private bool _loading = true;
+    private bool _authenticated;
+    private bool _busy;
+    private string? _error;
+    private string? _success;
+    private LeagueDiscovery? _discovery;
+    private readonly LoginModel _login = new();
+    private readonly LookupModel _lookup = new() { Season = DateTime.UtcNow.Year };
+    private readonly SelectionModel _selection = new();
+
+    private LeagueDiscoveryLeague? SelectedLeague =>
+        _discovery?.Leagues.FirstOrDefault(x => x.League.LeagueId == _selection.LeagueId);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await CheckSessionAsync();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task CheckSessionAsync()
+    {
+        try
+        {
+            var response = await Js.InvokeAsync<BrowserResponse>("sleeperApi.request", "/api/auth/session", "GET", null, null);
+            _authenticated = response.Status is >= 200 and < 300
+                && JsonSerializer.Deserialize<SessionResponse>(response.Body, JsonOptions)?.Authenticated == true;
+            if (response.Status is < 200 or >= 300)
+            {
+                _error = "The API rejected the session check. Restart the API and try again.";
+            }
+        }
+        catch (JSException)
+        {
+            _error = "The API could not be reached. Confirm it is running on the configured API URL, then reload this page.";
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        _busy = true;
+        ClearMessages();
+        try
+        {
+            var token = await GetAntiforgeryTokenAsync();
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                "/api/auth/login",
+                "POST",
+                JsonSerializer.Serialize(new { email = _login.Email, password = _login.Password, rememberMe = false }),
+                token);
+            if (response.Status is >= 200 and < 300)
+            {
+                _authenticated = true;
+                _success = "Signed in. Find your Sleeper league below.";
+            }
+            else
+            {
+                _error = ErrorMessage(response, "Sign-in failed. Check your credentials and try again.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DiscoverAsync()
+    {
+        _busy = true;
+        ClearMessages();
+        _discovery = null;
+        _selection.LeagueId = string.Empty;
+        _selection.RosterId = string.Empty;
+        try
+        {
+            var query = $"/api/v1/league/discovery?username={Uri.EscapeDataString(_lookup.Username.Trim())}&season={_lookup.Season}";
+            var response = await Js.InvokeAsync<BrowserResponse>("sleeperApi.request", query, "GET", null, null);
+            if (response.Status is >= 200 and < 300)
+            {
+                _discovery = JsonSerializer.Deserialize<LeagueDiscovery>(response.Body, JsonOptions);
+                if (_discovery is null || _discovery.Leagues.Count == 0)
+                {
+                    _error = "No selectable leagues were found for that username and season.";
+                }
+            }
+            else
+            {
+                _error = ErrorMessage(response, "Sleeper league lookup failed. Try again later.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        ClearMessages();
+        try
+        {
+            var token = await GetAntiforgeryTokenAsync();
+            var response = await Js.InvokeAsync<BrowserResponse>(
+                "sleeperApi.request",
+                "/api/v1/league/configuration",
+                "POST",
+                JsonSerializer.Serialize(new
+                {
+                    username = _lookup.Username.Trim(),
+                    season = _lookup.Season,
+                    leagueId = _selection.LeagueId,
+                    rosterId = _selection.RosterId,
+                    teamName = (string?)null
+                }),
+                token);
+            if (response.Status is >= 200 and < 300)
+            {
+                _success = "League configuration saved securely.";
+            }
+            else
+            {
+                _error = ErrorMessage(response, "The league configuration could not be saved.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<string?> GetAntiforgeryTokenAsync()
+    {
+        var response = await Js.InvokeAsync<BrowserResponse>("sleeperApi.request", "/api/auth/antiforgery", "GET", null, null);
+        return response.Status is >= 200 and < 300
+            ? JsonSerializer.Deserialize<AntiforgeryResponse>(response.Body, JsonOptions)?.Token
+            : null;
+    }
+
+    private static string ErrorMessage(BrowserResponse response, string fallback)
+    {
+        try
+        {
+            var error = JsonSerializer.Deserialize<ApiError>(response.Body, JsonOptions);
+            return string.IsNullOrWhiteSpace(error?.Message) ? fallback : error.Message;
+        }
+        catch (JsonException)
+        {
+            return fallback;
+        }
+    }
+
+    private void ClearMessages()
+    {
+        _error = null;
+        _success = null;
+    }
+
+    private sealed class LoginModel
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+
+    private sealed class LookupModel
+    {
+        [Required, StringLength(64, MinimumLength = 1)]
+        public string Username { get; set; } = string.Empty;
+
+        [Range(2000, 2100)]
+        public int Season { get; set; }
+    }
+
+    private sealed class SelectionModel
+    {
+        [Required(ErrorMessage = "Select a league.")]
+        public string LeagueId { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Select a roster.")]
+        public string RosterId { get; set; } = string.Empty;
+    }
+
+    private sealed record BrowserResponse(int Status, string Body);
+    private sealed record SessionResponse(bool Authenticated);
+    private sealed record AntiforgeryResponse(string Token);
+    private sealed record ApiError(string? Message);
+    private sealed record LeagueDiscovery(SleeperUser User, List<LeagueDiscoveryLeague> Leagues);
+    private sealed record SleeperUser(string UserId, string Username, string? DisplayName);
+    private sealed record LeagueDiscoveryLeague(LeagueSummary League, List<LeagueTeam> Teams);
+    private sealed record LeagueSummary(string LeagueId, string Name, string Season, string Status, string Sport, int TotalRosters, string? ScoringType);
+    private sealed record LeagueTeam(string RosterId, string OwnerUserId, string TeamName, bool IsManagerTeam);
+}

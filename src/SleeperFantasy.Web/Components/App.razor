@@ -1,4 +1,6 @@
 ﻿<!DOCTYPE html>
+@inject IConfiguration Configuration
+
 <html lang="en">
 
 <head>
@@ -15,6 +17,10 @@
 <body>
     <Routes />
     <ReconnectModal />
+    <script>
+        window.sleeperApiBaseUrl = '@(Configuration["ApiBaseUrl"] ?? "/")';
+    </script>
+    <script src="api.js"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 

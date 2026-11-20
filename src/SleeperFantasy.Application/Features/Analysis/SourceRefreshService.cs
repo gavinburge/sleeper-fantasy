@@ -186,7 +186,7 @@ public sealed class SourceRefreshService(
         var conflicted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var unmatched = 0;
         var ambiguous = 0;
-        foreach (var player in players.Values)
+        foreach (var player in players.Values.Where(x => x.Active))
         {
             if (candidates.Count == 0
                 && rosterResult.Availability == ProviderAvailability.Unavailable)

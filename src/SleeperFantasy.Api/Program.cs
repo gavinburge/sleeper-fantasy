@@ -10,6 +10,25 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddAntiforgery();
 builder.Services.AddAuthorization();
+builder.Services.AddCors(options =>
+{
+    var webOrigin = builder.Configuration["Runtime:PublicBaseUrl"] ?? "http://localhost:5187";
+    var allowedOrigins = new List<string> { webOrigin };
+    if (builder.Environment.IsDevelopment())
+    {
+        allowedOrigins.AddRange([
+            "http://localhost:5055",
+            "https://localhost:7040",
+            "https://localhost:5055"
+        ]);
+    }
+
+    options.AddPolicy("WebClient", policy =>
+        policy.WithOrigins(allowedOrigins.ToArray())
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials());
+});
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
@@ -20,6 +39,7 @@ await app.Services.SeedAdministratorAsync();
 
 app.UseExceptionHandler();
 app.UseHttpsRedirection();
+app.UseCors("WebClient");
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

@@ -164,6 +164,24 @@ public sealed class SourceRefreshServiceTests
             || x.EvidenceType == "identity-conflict");
     }
 
+    [Fact]
+    public async Task Skips_inactive_sleeper_players_during_identity_resolution()
+    {
+        var fixture = new AnalysisFixture
+        {
+            AdditionalPlayers = new Dictionary<string, PlayerRecord>
+            {
+                ["inactive"] = new("inactive", "Inactive Player", null, null, null, null, null, null, null, false)
+            }
+        };
+
+        var result = await fixture.CreateRefreshService().RefreshAsync(
+            fixture.Configuration,
+            CancellationToken.None);
+
+        Assert.DoesNotContain(result.Evidence, x => x.SubjectKey == "inactive");
+    }
+
     internal sealed class CollidingIdentityResolver : IPlayerIdentityResolver
     {
         public IdentityMatch Resolve(

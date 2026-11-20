@@ -25,6 +25,8 @@ internal sealed class AnalysisFixture
     public readonly PlayerRecord FreePlayer =
         new("free", "Free Player", null, null, "WR", "ABC", null, null, null, true);
 
+    public IReadOnlyDictionary<string, PlayerRecord> AdditionalPlayers { get; set; } =
+        new Dictionary<string, PlayerRecord>();
     public IReadOnlyList<ExternalPlayerRecord> ExternalRoster { get; set; } = [];
     public bool FailExternalRoster { get; set; }
     public IReadOnlyDictionary<string, string> ExternalIds { get; set; } =
@@ -46,7 +48,7 @@ internal sealed class AnalysisFixture
         {
             ["rostered"] = new("rostered", "Rostered Player", null, null, "RB", "ABC", null, null, null, true),
             ["free"] = FreePlayer
-        },
+        }.Concat(AdditionalPlayers).ToDictionary(x => x.Key, x => x.Value),
         []);
 
     public RosterRiskReport RosterRisk =>
